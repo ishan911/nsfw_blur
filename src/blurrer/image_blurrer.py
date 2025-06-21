@@ -20,21 +20,28 @@ class ImageBlurrer:
         """Create a pixelated effect in a specific region of the image."""
         x, y, w, h = region
         
-        # Crop the region
-        region_img = image.crop((x, y, x + w, y + h))
+        # Add 10px extra to all 4 sides
+        extra_padding = 10
+        x_expanded = max(0, x - extra_padding)
+        y_expanded = max(0, y - extra_padding)
+        w_expanded = min(w + 2 * extra_padding, image.width - x_expanded)
+        h_expanded = min(h + 2 * extra_padding, image.height - y_expanded)
+        
+        # Crop the expanded region
+        region_img = image.crop((x_expanded, y_expanded, x_expanded + w_expanded, y_expanded + h_expanded))
         
         # Calculate new size (smaller size = more pixelated)
-        small_w = max(w // pixel_size, 1)
-        small_h = max(h // pixel_size, 1)
+        small_w = max(w_expanded // pixel_size, 1)
+        small_h = max(h_expanded // pixel_size, 1)
         
         # Resize down
         small_img = region_img.resize((small_w, small_h), Image.Resampling.NEAREST)
         
         # Resize back up
-        pixelated_region = small_img.resize((w, h), Image.Resampling.NEAREST)
+        pixelated_region = small_img.resize((w_expanded, h_expanded), Image.Resampling.NEAREST)
         
         # Paste the pixelated region back
-        image.paste(pixelated_region, (x, y))
+        image.paste(pixelated_region, (x_expanded, y_expanded))
         return image
 
     def process_image(self, input_path, output_path=None, pixel_size=10):
