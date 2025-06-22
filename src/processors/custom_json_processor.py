@@ -119,10 +119,11 @@ class CustomJSONImageProcessor(ImageProcessor):
         original_filename = os.path.basename(parsed_url.path)
         
         if not original_filename or '.' not in original_filename:
-            # Fallback to type-based filename
-            original_filename = f"{image_type}.jpg"
+            # Fallback to simple filename without image type
+            original_filename = "image.jpg"
         
-        return f"{slug}_{image_type}_{original_filename}"
+        # Remove slug and image type from filename - keep only original filename
+        return original_filename
     
     def process_custom_json_images(self, output_dir="data/custom_processed", pixel_size=10, 
                                  force=False, download_only=False):

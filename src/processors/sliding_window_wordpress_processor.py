@@ -145,8 +145,8 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
         original_filename = os.path.basename(parsed_url.path)
         
         if not original_filename or '.' not in original_filename:
-            # Fallback to type-based filename
-            original_filename = f"{image_type}.jpg"
+            # Fallback to simple filename without image type
+            original_filename = "image.jpg"
         
         # Determine WordPress uploads path based on image type
         if image_type == 'review_full_image':
