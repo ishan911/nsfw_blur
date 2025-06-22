@@ -1,6 +1,6 @@
 from src.blurrer import SlidingWindowBlurrer
 
-inputPath = "data/custom_downloads/celebrityzoom_screenshot_full_url_celebrityzoom-featured-image.jpg"
+inputPath = "data/RealityKings-Screenshot1-Jpg-2.png"
 outputPath = "output_sliding_window.jpg"
 
 # Initialize sliding window blurrer for better detection

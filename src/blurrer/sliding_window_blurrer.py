@@ -161,7 +161,7 @@ class SlidingWindowBlurrer:
 
     def create_wordpress_sizes_with_scaled_detections(self, original_image: Image.Image, detections: List[Dict[str, Any]], 
                                                     base_filename: str, output_dir: str, image_type: str = None, 
-                                                    base_pixel_size: int = 10) -> List[str]:
+                                                    base_pixel_size: int = 10, original_format: str = 'JPEG') -> List[str]:
         """
         Create WordPress-sized images by scaling detection coordinates and applying pixelation.
         This ensures consistent pixel size across all image sizes.
@@ -173,6 +173,7 @@ class SlidingWindowBlurrer:
             output_dir (str): Output directory
             image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
             base_pixel_size (int): Pixel size to use for all image sizes
+            original_format (str): Original image format ('JPEG', 'PNG', etc.)
             
         Returns:
             List of created file paths
@@ -189,6 +190,16 @@ class SlidingWindowBlurrer:
         else:
             # Default: create all sizes
             sizes_to_create = list(self.wordpress_sizes.keys())
+        
+        # Determine file extension based on original format
+        if original_format.upper() == 'PNG':
+            file_extension = '.png'
+            save_format = 'PNG'
+            save_kwargs = {}
+        else:
+            file_extension = '.jpg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 85}
         
         for size_name in sizes_to_create:
             width, height, crop = self.wordpress_sizes[size_name]
@@ -208,19 +219,19 @@ class SlidingWindowBlurrer:
             for detection in scaled_detections:
                 resized_image = self.pixelate_region(resized_image, detection['box'], base_pixel_size)
             
-            # Generate filename
+            # Generate filename with correct extension
             if size_name == 'blog-tn':
-                filename = f"{base_filename}-170x145.jpg"
+                filename = f"{base_filename}-170x145{file_extension}"
             elif size_name == 'category-thumb':
-                filename = f"{base_filename}-250x212.jpg"
+                filename = f"{base_filename}-250x212{file_extension}"
             elif size_name == 'swiper-desktop':
-                filename = f"{base_filename}-590x504.jpg"
+                filename = f"{base_filename}-590x504{file_extension}"
             else:
-                filename = f"{base_filename}-{width}x{height}.jpg"
+                filename = f"{base_filename}-{width}x{height}{file_extension}"
             
-            # Save resized image
+            # Save resized image with correct format
             output_path = os.path.join(output_dir, filename)
-            resized_image.save(output_path, 'JPEG', quality=85)
+            resized_image.save(output_path, save_format, **save_kwargs)
             created_files.append(output_path)
             print(f"  Created {size_name} size: {filename} (pixel_size: {base_pixel_size}, detections: {len(scaled_detections)})")
         
@@ -287,7 +298,7 @@ class SlidingWindowBlurrer:
 
     def create_wordpress_sizes_with_pixelation(self, original_image: Image.Image, detections: List[Dict[str, Any]], 
                                              base_filename: str, output_dir: str, image_type: str = None, 
-                                             base_pixel_size: int = 10) -> List[str]:
+                                             base_pixel_size: int = 10, original_format: str = 'JPEG') -> List[str]:
         """
         Create WordPress-sized images with scale-aware pixelation.
         Applies pixelation after resizing to maintain visibility.
@@ -299,6 +310,7 @@ class SlidingWindowBlurrer:
             output_dir (str): Output directory
             image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
             base_pixel_size (int): Base pixel size for the original image
+            original_format (str): Original image format ('JPEG', 'PNG', etc.)
             
         Returns:
             List of created file paths
@@ -315,6 +327,16 @@ class SlidingWindowBlurrer:
         else:
             # Default: create all sizes
             sizes_to_create = list(self.wordpress_sizes.keys())
+        
+        # Determine file extension based on original format
+        if original_format.upper() == 'PNG':
+            file_extension = '.png'
+            save_format = 'PNG'
+            save_kwargs = {}
+        else:
+            file_extension = '.jpg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 85}
         
         for size_name in sizes_to_create:
             width, height, crop = self.wordpress_sizes[size_name]
@@ -354,25 +376,25 @@ class SlidingWindowBlurrer:
                 if detection['score'] > 0.1:  # Apply confidence threshold
                     resized_image = self.pixelate_region(resized_image, detection['box'], scaled_pixel_size)
             
-            # Generate filename
+            # Generate filename with correct extension
             if size_name == 'blog-tn':
-                filename = f"{base_filename}-170x145.jpg"
+                filename = f"{base_filename}-170x145{file_extension}"
             elif size_name == 'category-thumb':
-                filename = f"{base_filename}-250x212.jpg"
+                filename = f"{base_filename}-250x212{file_extension}"
             elif size_name == 'swiper-desktop':
-                filename = f"{base_filename}-590x504.jpg"
+                filename = f"{base_filename}-590x504{file_extension}"
             else:
-                filename = f"{base_filename}-{width}x{height}.jpg"
+                filename = f"{base_filename}-{width}x{height}{file_extension}"
             
-            # Save resized image
+            # Save resized image with correct format
             output_path = os.path.join(output_dir, filename)
-            resized_image.save(output_path, 'JPEG', quality=85)
+            resized_image.save(output_path, save_format, **save_kwargs)
             created_files.append(output_path)
             print(f"  Created {size_name} size: {filename} (pixel_size: {scaled_pixel_size})")
         
         return created_files
     
-    def create_wordpress_sizes(self, processed_image: Image.Image, base_filename: str, output_dir: str, image_type: str = None) -> List[str]:
+    def create_wordpress_sizes(self, processed_image: Image.Image, base_filename: str, output_dir: str, image_type: str = None, original_format: str = 'JPEG') -> List[str]:
         """
         Create WordPress-sized images from the processed image based on image type.
         
@@ -381,6 +403,7 @@ class SlidingWindowBlurrer:
             base_filename (str): Base filename without extension
             output_dir (str): Output directory
             image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
+            original_format (str): Original image format ('JPEG', 'PNG', etc.)
             
         Returns:
             List of created file paths
@@ -398,25 +421,35 @@ class SlidingWindowBlurrer:
             # Default: create all sizes
             sizes_to_create = list(self.wordpress_sizes.keys())
         
+        # Determine file extension based on original format
+        if original_format.upper() == 'PNG':
+            file_extension = '.png'
+            save_format = 'PNG'
+            save_kwargs = {}
+        else:
+            file_extension = '.jpg'
+            save_format = 'JPEG'
+            save_kwargs = {'quality': 85}
+        
         for size_name in sizes_to_create:
             width, height, crop = self.wordpress_sizes[size_name]
             
             # Create resized image
             resized_image = self.resize_image(processed_image, (width, height), crop)
             
-            # Generate filename
+            # Generate filename with correct extension
             if size_name == 'blog-tn':
-                filename = f"{base_filename}-170x145.jpg"
+                filename = f"{base_filename}-170x145{file_extension}"
             elif size_name == 'category-thumb':
-                filename = f"{base_filename}-250x212.jpg"
+                filename = f"{base_filename}-250x212{file_extension}"
             elif size_name == 'swiper-desktop':
-                filename = f"{base_filename}-590x504.jpg"
+                filename = f"{base_filename}-590x504{file_extension}"
             else:
-                filename = f"{base_filename}-{width}x{height}.jpg"
+                filename = f"{base_filename}-{width}x{height}{file_extension}"
             
-            # Save resized image
+            # Save resized image with correct format
             output_path = os.path.join(output_dir, filename)
-            resized_image.save(output_path, 'JPEG', quality=85)
+            resized_image.save(output_path, save_format, **save_kwargs)
             created_files.append(output_path)
             print(f"  Created {size_name} size: {filename}")
         
@@ -653,18 +686,25 @@ class SlidingWindowBlurrer:
                 base_filename = os.path.splitext(os.path.basename(output_path))[0]
                 output_dir = os.path.dirname(output_path)
                 
+                # Detect original image format
+                original_format = 'JPEG'  # Default
+                if input_path.lower().endswith('.png'):
+                    original_format = 'PNG'
+                elif input_path.lower().endswith(('.jpg', '.jpeg')):
+                    original_format = 'JPEG'
+                
                 if use_scaled_detections:
                     # Load original image for scaled detection approach
                     original_image = Image.open(input_path)
                     
                     # Use scaled detection approach
                     created_files = self.create_wordpress_sizes_with_scaled_detections(
-                        original_image, merged_detections, base_filename, output_dir, image_type, pixel_size
+                        original_image, merged_detections, base_filename, output_dir, image_type, pixel_size, original_format
                     )
                     print(f"Created {len(created_files)} WordPress-sized images with scaled detections")
                 else:
                     # Use original approach (pixelate first, then resize)
-                    created_files = self.create_wordpress_sizes(image, base_filename, output_dir, image_type)
+                    created_files = self.create_wordpress_sizes(image, base_filename, output_dir, image_type, original_format)
                     print(f"Created {len(created_files)} WordPress-sized images with original approach")
         
         return image
@@ -767,18 +807,25 @@ class SlidingWindowBlurrer:
                 base_filename = os.path.splitext(os.path.basename(output_path))[0]
                 output_dir = os.path.dirname(output_path)
                 
+                # Detect original image format
+                original_format = 'JPEG'  # Default
+                if input_path.lower().endswith('.png'):
+                    original_format = 'PNG'
+                elif input_path.lower().endswith(('.jpg', '.jpeg')):
+                    original_format = 'JPEG'
+                
                 if use_scaled_detections:
                     # Load original image for scaled detection approach
                     original_image = Image.open(input_path)
                     
                     # Use scaled detection approach
                     created_files = self.create_wordpress_sizes_with_scaled_detections(
-                        original_image, merged_detections, base_filename, output_dir, image_type, pixel_size
+                        original_image, merged_detections, base_filename, output_dir, image_type, pixel_size, original_format
                     )
                     print(f"Created {len(created_files)} WordPress-sized images with scaled detections")
                 else:
                     # Use original approach (pixelate first, then resize)
-                    created_files = self.create_wordpress_sizes(image, base_filename, output_dir, image_type)
+                    created_files = self.create_wordpress_sizes(image, base_filename, output_dir, image_type, original_format)
                     print(f"Created {len(created_files)} WordPress-sized images with original approach")
         
         return image 
