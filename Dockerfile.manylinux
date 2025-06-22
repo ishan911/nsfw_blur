@@ -1,0 +1,56 @@
+# Use manylinux2014 image for maximum Linux compatibility
+# This image works on both AMD64 and ARM64 architectures
+FROM --platform=linux/amd64 quay.io/pypa/manylinux2014_x86_64:latest
+
+# Install additional system dependencies
+RUN yum install -y \
+    wget \
+    git \
+    pkg-config \
+    && yum clean all
+
+# Set up Python environment
+RUN /opt/python/cp39-cp39/bin/pip install --upgrade pip setuptools wheel
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN /opt/python/cp39-cp39/bin/pip install -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Create the executable using Python 3.9
+RUN /opt/python/cp39-cp39/bin/pyinstaller \
+    --onefile \
+    --add-data "models:models" \
+    --hidden-import cv2 \
+    --hidden-import numpy \
+    --hidden-import PIL \
+    --hidden-import requests \
+    --hidden-import onnxruntime \
+    --hidden-import tqdm \
+    --hidden-import json \
+    --hidden-import os \
+    --hidden-import sys \
+    --hidden-import shutil \
+    --hidden-import datetime \
+    --hidden-import urllib.parse \
+    --hidden-import pathlib \
+    --hidden-import argparse \
+    --name blurapi \
+    main.py
+
+# Create output directory
+RUN mkdir -p /output
+
+# Copy the executable to output
+RUN cp dist/blurapi /output/
+
+# Set permissions
+RUN chmod +x /output/blurapi
+
+# Default command
+CMD ["/bin/bash"] 

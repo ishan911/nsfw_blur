@@ -1,0 +1,94 @@
+# Use Ubuntu 20.04 as base image (widely supported and compatible)
+FROM ubuntu:20.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y \
+        python3 \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        gcc \
+        g++ \
+        make \
+        wget \
+        git \
+        libffi-dev \
+        libssl-dev \
+        zlib1g-dev \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        libtk-dev \
+        liblzma-dev \
+        libxext-dev \
+        libxrender-dev \
+        libxtst-dev \
+        libgl1-mesa-dev \
+        libglu1-mesa-dev \
+        libpng-dev \
+        libjpeg-turbo-dev \
+        libfreetype6-dev \
+        libfontconfig1-dev \
+        libtiff5-dev \
+        libwebp-dev \
+        libopenblas-dev \
+        liblapack-dev \
+        libatlas-base-dev \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer-plugins-bad1.0-dev \
+        libgstreamer-plugins-good1.0-dev \
+        libgstreamer-plugins-ugly1.0-dev \
+        pkg-config \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up Python environment
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Create the executable
+RUN pyinstaller \
+    --onefile \
+    --add-data "models:models" \
+    --hidden-import cv2 \
+    --hidden-import numpy \
+    --hidden-import PIL \
+    --hidden-import requests \
+    --hidden-import onnxruntime \
+    --hidden-import tqdm \
+    --hidden-import json \
+    --hidden-import os \
+    --hidden-import sys \
+    --hidden-import shutil \
+    --hidden-import datetime \
+    --hidden-import urllib.parse \
+    --hidden-import pathlib \
+    --hidden-import argparse \
+    --name blurapi \
+    main.py
+
+# Create output directory
+RUN mkdir -p /output
+
+# Copy the executable to output
+RUN cp dist/blurapi /output/
+
+# Set permissions
+RUN chmod +x /output/blurapi
+
+# Default command
+CMD ["/bin/bash"] 
