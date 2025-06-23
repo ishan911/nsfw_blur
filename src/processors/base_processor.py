@@ -24,6 +24,8 @@ class ImageProcessor:
         
         # Initialize the blurrer
         self.blurrer = ImageBlurrer(model_path=model_path, parts=[
+            'BUTTOCKS_EXPOSED',
+            'BUTTOCKS_COVERED',
             'FEMALE_BREAST_EXPOSED',
             'FEMALE_GENITALIA_EXPOSED',
             'FEMALE_BREAST_COVERED',

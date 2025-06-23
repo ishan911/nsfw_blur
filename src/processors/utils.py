@@ -11,6 +11,8 @@ import os
 def list_available_parts():
     """List available body parts for blurring."""
     parts = [
+        'BUTTOCKS_EXPOSED',
+        'BUTTOCKS_COVERED',
         'FEMALE_BREAST_EXPOSED',
         'FEMALE_GENITALIA_EXPOSED',
         'ANUS_EXPOSED',

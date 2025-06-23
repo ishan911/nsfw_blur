@@ -55,6 +55,8 @@ image = Image.open(inputPath)
 
 areas = [
     #   'FEMALE_GENI
+    'BUTTOCKS_EXPOSED',
+        'BUTTOCKS_COVERED',
       'FEMALE_BREAST_EXPOSED',
       'FEMALE_GENITALIA_EXPOSED',
       'ANUS_EXPOSED',

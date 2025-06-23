@@ -11,6 +11,8 @@ def main():
     blurrer = SlidingWindowBlurrer(
         model_path='models/640m.onnx',
         parts=[
+            'BUTTOCKS_EXPOSED',
+            'BUTTOCKS_COVERED',
             'FEMALE_BREAST_EXPOSED',
             'FEMALE_GENITALIA_EXPOSED',
             'FEMALE_BREAST_COVERED',
@@ -41,6 +43,8 @@ def main():
     blurrer_hr = SlidingWindowBlurrer(
         model_path='models/640m.onnx',
         parts=[
+            'BUTTOCKS_EXPOSED',
+            'BUTTOCKS_COVERED',
             'FEMALE_BREAST_EXPOSED',
             'FEMALE_GENITALIA_EXPOSED',
             'FEMALE_BREAST_COVERED',

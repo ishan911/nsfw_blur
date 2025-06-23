@@ -1,12 +1,14 @@
 from src.blurrer import SlidingWindowBlurrer
 
-inputPath = "data/RealityKings-Screenshot1-Jpg-2.png"
+inputPath = "data/Analvids.jpg"
 outputPath = "output_sliding_window.jpg"
 
 # Initialize sliding window blurrer for better detection
 blurrer = SlidingWindowBlurrer(
     model_path='models/640m.onnx', 
     parts=[
+        'BUTTOCKS_EXPOSED',
+        'BUTTOCKS_COVERED',
         'FEMALE_BREAST_EXPOSED',
         'FEMALE_GENITALIA_EXPOSED',
         'FEMALE_BREAST_COVERED',
