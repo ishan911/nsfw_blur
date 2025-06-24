@@ -1,0 +1,6 @@
+path: /Users/ishanjayman/MrGeek/Projects/Daniel/AI/yolo_v8_model
+train: train_list.txt
+val: val_list.txt
+nc: 1
+names:
+- MALE_GENITALIA_EXPOSED
