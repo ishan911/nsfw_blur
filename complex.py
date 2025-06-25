@@ -5,7 +5,7 @@ outputPath = "output_sliding_window.jpg"
 
 # Initialize sliding window blurrer for better detection
 blurrer = SlidingWindowBlurrer(
-    model_path='models/640m.onnx', 
+    model_path='models/male.onnx', 
     parts=[
         'BUTTOCKS_EXPOSED',
         'BUTTOCKS_COVERED',
