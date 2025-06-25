@@ -1,6 +1,7 @@
-path: /Users/ishanjayman/MrGeek/Projects/Daniel/AI/yolo_v8_model
+path: /Users/ishanjayman/MrGeek/Projects/Daniel/AI/BlurImages/blurapi/yolo_v8_model
 train: train_list.txt
 val: val_list.txt
-nc: 1
+nc: 2
 names:
 - MALE_GENITALIA_EXPOSED
+- NOT_NUDE
