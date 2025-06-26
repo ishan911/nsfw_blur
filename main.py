@@ -104,12 +104,17 @@ def main():
         'restore-backup'
     ], help='Command to execute')
     
+    # Positional arguments for legacy commands
+    parser.add_argument('input', nargs='?', help='Input file, directory, or JSON URL')
+    parser.add_argument('output', nargs='?', help='Output file or directory')
+    
     # Common arguments
-    parser.add_argument('--input', '-i', help='Input file or directory')
-    parser.add_argument('--output', '-o', help='Output file or directory')
+    parser.add_argument('--input', '-i', help='Input file or directory (alternative to positional)')
+    parser.add_argument('--output', '-o', help='Output file or directory (alternative to positional)')
     parser.add_argument('--window-size', type=int, default=512, help='Sliding window size')
     parser.add_argument('--stride', type=int, default=256, help='Sliding window stride')
     parser.add_argument('--overlap-threshold', type=float, default=0.3, help='Overlap threshold for merging detections')
+    parser.add_argument('--confidence-threshold', type=float, default=0.1, help='Minimum confidence for detections')
     
     # Detection method arguments
     parser.add_argument('--nudenet', action='store_true', help='Enable NudeNet detection')
@@ -126,14 +131,24 @@ def main():
     parser.add_argument('--wordpress-dir', default='wp-content/uploads', help='WordPress uploads directory')
     
     # Custom JSON specific arguments
-    parser.add_argument('--json-url', help='URL to JSON data')
+    parser.add_argument('--json-url', help='URL to JSON data (alternative to positional input)')
+    parser.add_argument('--base-url', help='Base URL for converting relative paths to absolute URLs')
     parser.add_argument('--download-dir', default='downloads', help='Directory to download images')
+    parser.add_argument('--force', action='store_true', help='Force reprocessing even if already processed')
+    parser.add_argument('--download-only', action='store_true', help='Only download images, do not process them')
     
     # Backup restore arguments
     parser.add_argument('--backup-dir', default='wp-content/uploads/backup', help='Backup directory path')
     parser.add_argument('--no-dry-run', action='store_true', help='Actually restore files (not dry run)')
     
     args = parser.parse_args()
+    
+    # Handle positional arguments for legacy commands
+    if args.command in ['sliding-json', 'sliding-single', 'sliding-batch', 'sliding-wordpress']:
+        if args.input and not args.json_url:
+            args.json_url = args.input
+        if args.output:
+            args.output_dir = args.output
     
     if args.command == 'restore-backup':
         result = restore_backup_files(args.backup_dir, dry_run=not args.no_dry_run)
@@ -160,15 +175,15 @@ def main():
         nudenet_enabled = True
         yolo_enabled = True
     
-    if args.command == 'process-custom-json' or args.command == 'sliding-json':
+    if args.command == 'sliding-json':
         if not args.json_url:
-            print("Error: --json-url is required for process-custom-json/sliding-json command")
+            print("Error: JSON URL is required for sliding-json command")
             return
         
         processor = SlidingWindowCustomJSONImageProcessor(
             json_url=args.json_url,
             json_file=None,
-            base_url=None,
+            base_url=args.base_url,
             model_path=args.yolo_model,
             database_path=None,
             window_size=args.window_size,
@@ -186,8 +201,41 @@ def main():
         processor.process_custom_json_images(
             output_dir=args.output,
             pixel_size=args.pixel_size,
-            force=True,
-            download_only=False,
+            force=args.force,
+            download_only=args.download_only,
+            use_yolo_detection=True,
+            yolo_confidence_threshold=args.yolo_confidence,
+            yolo_model_path=args.yolo_model
+        )
+        
+    elif args.command == 'process-custom-json':
+        if not args.json_url:
+            print("Error: --json-url is required for process-custom-json command")
+            return
+        
+        processor = SlidingWindowCustomJSONImageProcessor(
+            json_url=args.json_url,
+            json_file=None,
+            base_url=args.base_url,
+            model_path=args.yolo_model,
+            database_path=None,
+            window_size=args.window_size,
+            stride=args.stride,
+            overlap_threshold=args.overlap_threshold,
+            nudenet_enabled=nudenet_enabled,
+            yolo_enabled=yolo_enabled,
+            nudenet_confidence_threshold=args.nudenet_confidence,
+            yolo_confidence_threshold=args.yolo_confidence,
+            yolo_model_path=args.yolo_model,
+            blur_method=args.blur_method,
+            pixel_size=args.pixel_size
+        )
+        
+        processor.process_custom_json_images(
+            output_dir=args.output,
+            pixel_size=args.pixel_size,
+            force=args.force,
+            download_only=args.download_only,
             use_yolo_detection=True,
             yolo_confidence_threshold=args.yolo_confidence,
             yolo_model_path=args.yolo_model
