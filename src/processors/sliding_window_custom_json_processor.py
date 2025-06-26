@@ -276,42 +276,14 @@ class SlidingWindowCustomJSONImageProcessor(CustomJSONImageProcessor):
         for item in json_data:
             slug = item.get('slug', 'unknown')
             
-            # Process screenshot_full_url
-            if 'screenshot_full_url' in item and item['screenshot_full_url']:
-                total_images += 1
-                image_url = item['screenshot_full_url']
-                image_type = 'screenshot_full_url'
-                
-                try:
-                    # Download the image
-                    local_path = self.download_image(image_url, output_dir, slug, image_type)
-                    if local_path:
-                        downloaded_count += 1
-                        
-                        # Process the image if not download-only
-                        if not download_only:
-                            output_path = self.get_output_path(local_path, output_dir, slug, image_type)
-                            result = self.process_single_image(
-                                local_path, output_path, pixel_size, confidence_threshold, force,
-                                image_type, use_yolo_detection, yolo_model_path, yolo_confidence_threshold,
-                                use_nudenet_two_stage, use_yolo_two_stage, blur_method
-                            )
-                            if result:
-                                processed_count += 1
-                            else:
-                                error_count += 1
-                    else:
-                        error_count += 1
-                        
-                except Exception as e:
-                    print(f"    Error processing {image_type} for {slug}: {str(e)}")
-                    error_count += 1
+            # Extract all image URLs from this item using extract_image_urls
+            # This ensures base_url is properly joined for relative URLs
+            image_urls = self.extract_image_urls(item)
             
-            # Process review_full_image
-            if 'review_full_image' in item and item['review_full_image']:
+            for image_info in image_urls:
                 total_images += 1
-                image_url = item['review_full_image']
-                image_type = 'review_full_image'
+                image_url = image_info['url']
+                image_type = image_info['type']
                 
                 try:
                     # Download the image
@@ -927,4 +899,63 @@ class SlidingWindowCustomJSONImageProcessor(CustomJSONImageProcessor):
                 merged_detections.append(detection_info)
                 used_indices.add(i)
         
-        return merged_detections 
+        return merged_detections
+    
+    def download_image(self, image_url, output_dir, slug, image_type):
+        """Download an image from URL to local path with proper directory structure."""
+        try:
+            import requests
+            import os
+            from urllib.parse import urlparse
+            
+            # Create the download directory structure
+            download_dir = os.path.join(output_dir, "downloads", slug)
+            os.makedirs(download_dir, exist_ok=True)
+            
+            # Generate filename based on image type
+            parsed_url = urlparse(image_url)
+            original_filename = os.path.basename(parsed_url.path)
+            
+            if not original_filename or '.' not in original_filename:
+                # Fallback filename
+                original_filename = f"{image_type}.jpg"
+            
+            # Create local path
+            local_path = os.path.join(download_dir, original_filename)
+            
+            # Download the image
+            response = requests.get(image_url, timeout=30, stream=True)
+            response.raise_for_status()
+            
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            return local_path
+            
+        except Exception as e:
+            print(f"Error downloading image {image_url}: {e}")
+            return None
+    
+    def get_output_path(self, local_path, output_dir, slug, image_type):
+        """Generate output path for processed image with WordPress directory structure."""
+        import os
+        from urllib.parse import urlparse
+        
+        # Create WordPress-style directory structure
+        if image_type == 'screenshot_full_url':
+            # Create screenshots directory
+            wp_dir = os.path.join(output_dir, "wp-content", "uploads", "screenshots")
+        else:  # review_full_image
+            # Create regular uploads directory
+            wp_dir = os.path.join(output_dir, "wp-content", "uploads")
+        
+        os.makedirs(wp_dir, exist_ok=True)
+        
+        # Get original filename
+        original_filename = os.path.basename(local_path)
+        
+        # Create output path
+        output_path = os.path.join(wp_dir, original_filename)
+        
+        return output_path 

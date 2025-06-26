@@ -110,7 +110,7 @@ def main():
     
     # Common arguments
     parser.add_argument('--input', '-i', help='Input file or directory (alternative to positional)')
-    parser.add_argument('--output', '-o', help='Output file or directory (alternative to positional)')
+    parser.add_argument('--output', '-o', default='data/custom_processed', help='Output file or directory')
     parser.add_argument('--window-size', type=int, default=512, help='Sliding window size')
     parser.add_argument('--stride', type=int, default=256, help='Sliding window stride')
     parser.add_argument('--overlap-threshold', type=float, default=0.3, help='Overlap threshold for merging detections')
@@ -184,22 +184,18 @@ def main():
             json_url=args.json_url,
             json_file=None,
             base_url=args.base_url,
-            model_path=args.yolo_model,
+            model_path=args.yolo_model or 'models/640m.onnx',
             database_path=None,
             window_size=args.window_size,
             stride=args.stride,
             overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
+            yolo_model_path=args.yolo_model
         )
         
+        output_dir = args.output or "data/custom_processed"
+        
         processor.process_custom_json_images(
-            output_dir=args.output,
+            output_dir=output_dir,
             pixel_size=args.pixel_size,
             force=args.force,
             download_only=args.download_only,
@@ -217,22 +213,18 @@ def main():
             json_url=args.json_url,
             json_file=None,
             base_url=args.base_url,
-            model_path=args.yolo_model,
+            model_path=args.yolo_model or 'models/640m.onnx',
             database_path=None,
             window_size=args.window_size,
             stride=args.stride,
             overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
+            yolo_model_path=args.yolo_model
         )
         
+        output_dir = args.output or "data/custom_processed"
+        
         processor.process_custom_json_images(
-            output_dir=args.output,
+            output_dir=output_dir,
             pixel_size=args.pixel_size,
             force=args.force,
             download_only=args.download_only,
