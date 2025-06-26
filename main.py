@@ -99,7 +99,8 @@ def main():
     parser = argparse.ArgumentParser(description='WordPress Image Processing Tool')
     parser.add_argument('command', choices=[
         'process-single', 'process-batch', 'process-wordpress', 
-        'process-custom-json', 'process-single-slide', 'process-batch-slide',
+        'process-custom-json', 'sliding-json', 'process-single-slide', 'process-batch-slide',
+        'sliding-single', 'sliding-batch', 'sliding-wordpress',
         'restore-backup'
     ], help='Command to execute')
     
@@ -159,9 +160,9 @@ def main():
         nudenet_enabled = True
         yolo_enabled = True
     
-    if args.command == 'process-custom-json':
+    if args.command == 'process-custom-json' or args.command == 'sliding-json':
         if not args.json_url:
-            print("Error: --json-url is required for process-custom-json command")
+            print("Error: --json-url is required for process-custom-json/sliding-json command")
             return
         
         processor = SlidingWindowCustomJSONImageProcessor(
@@ -192,9 +193,9 @@ def main():
             yolo_model_path=args.yolo_model
         )
         
-    elif args.command == 'process-single-slide':
+    elif args.command == 'process-single-slide' or args.command == 'sliding-single':
         if not args.input or not args.output:
-            print("Error: --input and --output are required for process-single-slide command")
+            print("Error: --input and --output are required for process-single-slide/sliding-single command")
             return
         
         processor = SlidingWindowImageProcessor(
@@ -220,9 +221,9 @@ def main():
             force=True
         )
         
-    elif args.command == 'process-batch-slide':
+    elif args.command == 'process-batch-slide' or args.command == 'sliding-batch':
         if not args.input or not args.output:
-            print("Error: --input and --output are required for process-batch-slide command")
+            print("Error: --input and --output are required for process-batch-slide/sliding-batch command")
             return
         
         input_dir = args.input
@@ -255,7 +256,7 @@ def main():
             force=True
         )
         
-    elif args.command == 'process-wordpress':
+    elif args.command == 'process-wordpress' or args.command == 'sliding-wordpress':
         processor = SlidingWindowWordPressImageProcessor(
             wordpress_dir=args.wordpress_dir,
             window_size=args.window_size,
