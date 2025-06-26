@@ -20,32 +20,56 @@ import sys
 
 
 class TwoStageSlidingWindowDetector:
-    def __init__(self, nudenet_model_path="../models/640m.onnx", yolo_model_path="runs/detect/train8/weights/best.pt",
-                 window_size=640, stride=320, overlap_threshold=0.3):
+    def __init__(self, nudenet_model_path='models/classifier_model.onnx', yolo_model_path='models/80_epoch.pt',
+                 window_size=640, stride=320, overlap_threshold=0.3,
+                 nudenet_enabled=True, yolo_enabled=True,
+                 nudenet_confidence_threshold=0.6, yolo_confidence_threshold=0.5,
+                 blur_method='pixelate', pixel_size=10):
         """
-        Initialize TwoStageSlidingWindowDetector with both NudeNet and YOLO models.
+        Initialize the two-stage sliding window detector.
         
         Args:
-            nudenet_model_path (str): Path to the NudeNet ONNX model
-            yolo_model_path (str): Path to the YOLO model
-            window_size (int): Size of the sliding window (width=height)
-            stride (int): Stride between windows (should be <= window_size)
-            overlap_threshold (float): Threshold for merging overlapping detections
+            nudenet_model_path (str): Path to NudeNet model
+            yolo_model_path (str): Path to YOLO model
+            window_size (int): Size of sliding windows
+            stride (int): Stride between windows
+            overlap_threshold (float): IoU threshold for merging detections
+            nudenet_enabled (bool): Enable NudeNet detection
+            yolo_enabled (bool): Enable YOLO detection
+            nudenet_confidence_threshold (float): NudeNet confidence threshold
+            yolo_confidence_threshold (float): YOLO confidence threshold
+            blur_method (str): 'pixelate' or 'blur'
+            pixel_size (int): Pixel size for pixelation
         """
-        print("Initializing TwoStageSlidingWindowDetector")
-        print("  NudeNet model: {}".format(nudenet_model_path))
-        print("  YOLO model: {}".format(yolo_model_path))
-        
-        # Initialize NudeNet detector
-        self.nudenet_detector = NudeDetector(model_path=nudenet_model_path)
-        
-        # Initialize YOLO model
-        self.yolo_model = YOLO(yolo_model_path)
-        
-        # Sliding window parameters
+        self.nudenet_model_path = nudenet_model_path
+        self.yolo_model_path = yolo_model_path
         self.window_size = window_size
         self.stride = stride
         self.overlap_threshold = overlap_threshold
+        self.nudenet_enabled = nudenet_enabled
+        self.yolo_enabled = yolo_enabled
+        self.nudenet_confidence_threshold = nudenet_confidence_threshold
+        self.yolo_confidence_threshold = yolo_confidence_threshold
+        self.blur_method = blur_method
+        self.pixel_size = pixel_size
+        
+        # Initialize NudeNet detector
+        if self.nudenet_enabled:
+            try:
+                from nudenet import NudeDetector
+                self.nudenet_detector = NudeDetector(self.nudenet_model_path)
+            except ImportError:
+                print("Warning: nudenet not available. NudeNet detection will be skipped.")
+                self.nudenet_enabled = False
+        
+        # Initialize YOLO model
+        if self.yolo_enabled:
+            try:
+                from ultralytics import YOLO
+                self.yolo_model = YOLO(self.yolo_model_path)
+            except ImportError:
+                print("Warning: ultralytics not available. YOLO detection will be skipped.")
+                self.yolo_enabled = False
         
         # NudeNet body parts to detect
         self.nudenet_parts = [
@@ -339,209 +363,416 @@ class TwoStageSlidingWindowDetector:
         
         return image
     
-    def nudenet_stage(self, image: np.ndarray, nudenet_confidence_threshold: float = 0.1,
-                     pixel_size: int = 15, blur_method: str = 'pixelate') -> np.ndarray:
+    def nudenet_full_image_stage(self, image_path):
         """
-        First stage: NudeNet detection and blurring.
+        First stage: NudeNet full image detection and blurring.
         
         Args:
-            image (np.ndarray): Input image
-            nudenet_confidence_threshold (float): Minimum confidence for NudeNet detections
-            pixel_size (int): Pixel size for pixelation
-            blur_method (str): 'pixelate' or 'blur'
-            
-        Returns:
-            Image with NudeNet detections blurred
-        """
-        print("=== Stage 1: NudeNet Detection ===")
-        
-        # Convert numpy array to PIL Image for NudeNet
-        pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        
-        # Save temporary image for NudeNet detection
-        temp_path = "temp_nudenet.jpg"
-        pil_image.save(temp_path)
-        
-        # Run NudeNet detection
-        nudenet_results = self.nudenet_detector.detect(temp_path)
-        
-        # Clean up temporary file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-        print(f"NudeNet found {len(nudenet_results)} detections")
-        
-        # Process NudeNet detections
-        processed_image = image.copy()
-        nudenet_detection_count = 0
-        
-        for result in nudenet_results:
-            if result['class'] in self.nudenet_parts and result['score'] >= nudenet_confidence_threshold:
-                nudenet_detection_count += 1
-                box = result['box']  # [x, y, w, h] format
-                score = result['score']
-                class_name = result['class']
-                
-                print(f"  NudeNet: {class_name} (confidence: {score:.3f}) at {box}")
-                
-                # Convert [x, y, w, h] to [x1, y1, x2, y2] for processing
-                x, y, w, h = box
-                region = [x, y, x + w, y + h]
-                
-                if blur_method == 'pixelate':
-                    processed_image = self.pixelate_region(processed_image, region, pixel_size)
-                else:  # blur
-                    processed_image = self.blur_region(processed_image, region, pixel_size)
-        
-        print(f"NudeNet stage processed {nudenet_detection_count} detections")
-        return processed_image
-    
-    def yolo_stage(self, image: np.ndarray, yolo_confidence_threshold: float = 0.1,
-                  pixel_size: int = 15, blur_method: str = 'pixelate') -> np.ndarray:
-        """
-        Second stage: YOLO sliding window detection and blurring.
-        
-        Args:
-            image (np.ndarray): Input image (already processed by NudeNet)
-            yolo_confidence_threshold (float): Minimum confidence for YOLO detections
-            pixel_size (int): Pixel size for pixelation
-            blur_method (str): 'pixelate' or 'blur'
-            
-        Returns:
-            Image with YOLO detections blurred
-        """
-        print("=== Stage 2: YOLO Sliding Window Detection ===")
-        print(f"Window size: {self.window_size}x{self.window_size}")
-        print(f"Stride: {self.stride}")
-        print(f"Overlap threshold: {self.overlap_threshold}")
-        print(f"Confidence threshold: {yolo_confidence_threshold}")
-        
-        height, width = image.shape[:2]
-        print(f"Image dimensions: {width}x{height}")
-        
-        # Create sliding windows
-        windows = self.create_sliding_windows(width, height)
-        print(f"Created {len(windows)} sliding windows")
-        
-        # Process each window
-        all_detections = []
-        
-        for i, window in enumerate(windows):
-            window_x, window_y, window_w, window_h = window
-            print(f"Processing window {i+1}/{len(windows)}: ({window_x}, {window_y}, {window_w}, {window_h})")
-            
-            # Crop the window
-            window_image = self.crop_window(image, window)
-            
-            # Run YOLO detection on the window
-            results = self.yolo_model(window_image, conf=yolo_confidence_threshold)
-            
-            if results and len(results) > 0:
-                result = results[0]
-                
-                # Check if any detections were found
-                if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
-                    # Translate coordinates to original image space
-                    translated_result = self.translate_detection_coordinates(result, window)
-                    all_detections.append(translated_result)
-                    print(f"  Found {len(result.boxes)} YOLO detections in window")
-                else:
-                    print(f"  No YOLO detections in window")
-            else:
-                print(f"  No YOLO detections in window")
-        
-        # Merge overlapping detections
-        print(f"Total YOLO detections before merging: {len(all_detections)}")
-        merged_detections = self.merge_overlapping_detections(all_detections)
-        print(f"Total YOLO detections after merging: {len(merged_detections)}")
-        
-        # Apply blurring/pixelation to YOLO detected regions
-        processed_image = image.copy()
-        yolo_detection_count = 0
-        
-        for detection_info in merged_detections:
-            yolo_detection_count += 1
-            box = detection_info['box']
-            conf = detection_info['conf']
-            cls = detection_info['cls']
-            
-            print(f"Processing YOLO detection: box={box}, confidence={conf:.3f}, class={cls}")
-            
-            if blur_method == 'pixelate':
-                processed_image = self.pixelate_region(processed_image, box, pixel_size)
-            else:  # blur
-                processed_image = self.blur_region(processed_image, box, pixel_size)
-        
-        print(f"YOLO stage processed {yolo_detection_count} detections")
-        return processed_image
-    
-    def process_image(self, input_path: str, output_path: str = None, 
-                     pixel_size: int = 15, nudenet_confidence_threshold: float = 0.1,
-                     yolo_confidence_threshold: float = 0.1, blur_method: str = 'pixelate') -> str:
-        """
-        Process an image using two-stage detection: NudeNet first, then YOLO sliding window.
-        
-        Args:
-            input_path (str): Path to input image
-            output_path (str): Path to output image (optional)
-            pixel_size (int): Pixel size for pixelation
-            nudenet_confidence_threshold (float): Minimum confidence for NudeNet detections
-            yolo_confidence_threshold (float): Minimum confidence for YOLO detections
-            blur_method (str): 'pixelate' or 'blur'
+            image_path (str): Path to input image
             
         Returns:
             Path to processed image
         """
-        if output_path is None:
-            base_name = os.path.splitext(os.path.basename(input_path))[0]
-            output_path = f"blurred_two_stage_{base_name}.jpg"
+        try:
+            import cv2
+            from PIL import Image
+            import os
+            
+            # Load the image
+            img = cv2.imread(image_path)
+            if img is None:
+                print(f"Could not load image: {image_path}")
+                return image_path
+            
+            height, width = img.shape[:2]
+            
+            # Convert to PIL Image for NudeNet
+            pil_image = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            
+            # Save temporary image for NudeNet
+            temp_path = "temp_nudenet_full.jpg"
+            pil_image.save(temp_path)
+            
+            # Run NudeNet detection
+            nudenet_results = self.nudenet_detector.detect(temp_path)
+            
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            
+            # Process NudeNet detections
+            nudenet_detection_count = 0
+            
+            for result in nudenet_results:
+                if result['score'] >= self.nudenet_confidence_threshold:
+                    nudenet_detection_count += 1
+                    box = result['box']  # [x, y, w, h] format
+                    score = result['score']
+                    class_name = result['class']
+                    
+                    # Convert [x, y, w, h] to [x1, y1, x2, y2] for processing
+                    x, y, w, h = box
+                    region = [x, y, x + w, y + h]
+                    
+                    if self.blur_method == 'pixelate':
+                        img = self.pixelate_region(img, region, self.pixel_size)
+                    else:  # blur
+                        img = self.blur_region(img, region, self.pixel_size)
+            
+            # Save the processed image
+            base_name = os.path.splitext(image_path)[0]
+            nudenet_processed_path = f"{base_name}_nudenet_full_processed.jpg"
+            cv2.imwrite(nudenet_processed_path, img)
+            
+            return nudenet_processed_path
+            
+        except Exception as e:
+            print(f"Error in NudeNet full image stage: {str(e)}")
+            return image_path
+    
+    def nudenet_sliding_window_stage(self, image_path):
+        """
+        Second stage: NudeNet sliding window detection and blurring.
         
-        print(f"Processing image: {input_path}")
-        print(f"Two-stage detection pipeline:")
-        print(f"  1. NudeNet detection (confidence ≥ {nudenet_confidence_threshold})")
-        print(f"  2. YOLO sliding window detection (confidence ≥ {yolo_confidence_threshold})")
-        print(f"  Blur method: {blur_method}")
-        print(f"  Pixel size: {pixel_size}")
+        Args:
+            image_path (str): Path to input image (already processed by NudeNet full image)
+            
+        Returns:
+            Path to processed image
+        """
+        try:
+            import cv2
+            from PIL import Image
+            import os
+            import numpy as np
+            
+            # Load the image
+            img = cv2.imread(image_path)
+            if img is None:
+                print(f"Could not load image: {image_path}")
+                return image_path
+            
+            height, width = img.shape[:2]
+            
+            # Create sliding windows
+            windows = self.create_sliding_windows(width, height)
+            
+            # Process each window
+            all_detections = []
+            
+            for i, window in enumerate(windows):
+                window_x, window_y, window_w, window_h = window
+                
+                # Crop the window
+                window_image = self.crop_window(img, window)
+                
+                # Convert to PIL Image for NudeNet
+                pil_window = Image.fromarray(cv2.cvtColor(window_image, cv2.COLOR_BGR2RGB))
+                
+                # Save temporary window image
+                temp_window_path = f"temp_nudenet_window_{i}.jpg"
+                pil_window.save(temp_window_path)
+                
+                # Run NudeNet detection on the window
+                window_results = self.nudenet_detector.detect(temp_window_path)
+                
+                # Clean up temporary file
+                if os.path.exists(temp_window_path):
+                    os.remove(temp_window_path)
+                
+                # Process window detections and translate coordinates
+                for result in window_results:
+                    if result['score'] >= self.nudenet_confidence_threshold:
+                        # Translate coordinates to original image space
+                        box = result['box']  # [x, y, w, h] format
+                        x, y, w, h = box
+                        
+                        # Translate to original image coordinates
+                        translated_x = x + window_x
+                        translated_y = y + window_y
+                        translated_w = min(w, width - translated_x)
+                        translated_h = min(h, height - translated_y)
+                        
+                        # Create detection info
+                        detection_info = {
+                            'box': [translated_x, translated_y, translated_x + translated_w, translated_y + translated_h],
+                            'conf': result['score'],
+                            'cls': result['class'],
+                            'detection': result
+                        }
+                        all_detections.append(detection_info)
+            
+            # Merge overlapping detections
+            merged_detections = self.merge_overlapping_detections(all_detections)
+            
+            # Apply blurring/pixelation to NudeNet detected regions
+            nudenet_detection_count = 0
+            
+            for detection_info in merged_detections:
+                nudenet_detection_count += 1
+                box = detection_info['box']
+                conf = detection_info['conf']
+                cls = detection_info['cls']
+                
+                if self.blur_method == 'pixelate':
+                    img = self.pixelate_region(img, box, self.pixel_size)
+                else:  # blur
+                    img = self.blur_region(img, box, self.pixel_size)
+            
+            # Save the processed image
+            base_name = os.path.splitext(image_path)[0]
+            nudenet_processed_path = f"{base_name}_nudenet_sliding_processed.jpg"
+            cv2.imwrite(nudenet_processed_path, img)
+            
+            return nudenet_processed_path
+            
+        except Exception as e:
+            print(f"Error in NudeNet sliding window stage: {str(e)}")
+            return image_path
+    
+    def yolo_full_image_stage(self, image_path):
+        """
+        Third stage: YOLO full image detection and blurring.
         
-        # Load the image
-        image = cv2.imread(input_path)
-        if image is None:
-            raise ValueError(f"Could not load image: {input_path}")
+        Args:
+            image_path (str): Path to input image (already processed by NudeNet stages)
+            
+        Returns:
+            Path to processed image
+        """
+        try:
+            import cv2
+            import os
+            
+            # Load the image
+            img = cv2.imread(image_path)
+            if img is None:
+                print(f"Could not load image: {image_path}")
+                return image_path
+            
+            height, width = img.shape[:2]
+            
+            # Run detection
+            results = self.yolo_model(image_path, conf=self.yolo_confidence_threshold)
+            
+            # Process YOLO detections
+            yolo_detection_count = 0
+            
+            if results and len(results) > 0:
+                result = results[0]
+                if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                    # Extract detection information
+                    boxes = result.boxes.xyxy.cpu().numpy()
+                    confs = result.boxes.conf.cpu().numpy()
+                    classes = result.boxes.cls.cpu().numpy()
+                    
+                    for i, box in enumerate(boxes):
+                        x1, y1, x2, y2 = map(int, box)
+                        confidence = float(confs[i])
+                        cls = int(classes[i])
+                        
+                        if self.blur_method == 'pixelate':
+                            img = self.pixelate_region(img, [x1, y1, x2, y2], self.pixel_size)
+                        else:  # blur
+                            img = self.blur_region(img, [x1, y1, x2, y2], self.pixel_size)
+                        
+                        yolo_detection_count += 1
+            
+            # Save the processed image
+            base_name = os.path.splitext(image_path)[0]
+            yolo_processed_path = f"{base_name}_yolo_full_processed.jpg"
+            cv2.imwrite(yolo_processed_path, img)
+            
+            return yolo_processed_path
+            
+        except Exception as e:
+            print(f"Error in YOLO full image stage: {str(e)}")
+            return image_path
+    
+    def yolo_sliding_window_stage(self, image_path):
+        """
+        Fourth stage: YOLO sliding window detection and blurring.
         
-        # Stage 1: NudeNet detection and blurring
-        image_after_nudenet = self.nudenet_stage(
-            image, 
-            nudenet_confidence_threshold, 
-            pixel_size, 
-            blur_method
-        )
+        Args:
+            image_path (str): Path to input image (already processed by previous stages)
+            
+        Returns:
+            Path to processed image
+        """
+        try:
+            import cv2
+            import os
+            import numpy as np
+            
+            # Load the image
+            img = cv2.imread(image_path)
+            if img is None:
+                print(f"Could not load image: {image_path}")
+                return image_path
+            
+            height, width = img.shape[:2]
+            
+            # Create sliding windows
+            windows = self.create_sliding_windows(width, height)
+            
+            # Process each window
+            all_detections = []
+            
+            for i, window in enumerate(windows):
+                window_x, window_y, window_w, window_h = window
+                
+                # Crop the window
+                window_image = self.crop_window(img, window)
+                
+                # Save temporary window image
+                temp_window_path = f"temp_yolo_window_{i}.jpg"
+                cv2.imwrite(temp_window_path, window_image)
+                
+                # Run YOLO detection on the window
+                result = self.yolo_model(temp_window_path, conf=self.yolo_confidence_threshold)
+                
+                # Clean up temporary file
+                if os.path.exists(temp_window_path):
+                    os.remove(temp_window_path)
+                
+                # Process window detections and translate coordinates
+                if result and len(result) > 0:
+                    result = result[0]
+                    if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                        # Extract detection information
+                        boxes = result.boxes.xyxy.cpu().numpy()
+                        confs = result.boxes.conf.cpu().numpy()
+                        classes = result.boxes.cls.cpu().numpy()
+                        
+                        for j, box in enumerate(boxes):
+                            x1, y1, x2, y2 = map(int, box)
+                            confidence = float(confs[j])
+                            cls = int(classes[j])
+                            
+                            # Translate to original image coordinates
+                            translated_x1 = x1 + window_x
+                            translated_y1 = y1 + window_y
+                            translated_x2 = min(x2 + window_x, width)
+                            translated_y2 = min(y2 + window_y, height)
+                            
+                            # Create detection info
+                            detection_info = {
+                                'box': [translated_x1, translated_y1, translated_x2, translated_y2],
+                                'conf': confidence,
+                                'cls': cls
+                            }
+                            all_detections.append(detection_info)
+            
+            # Merge overlapping detections
+            merged_detections = self.merge_overlapping_detections(all_detections)
+            
+            # Apply blurring/pixelation to YOLO detected regions
+            yolo_detection_count = 0
+            
+            for detection_info in merged_detections:
+                yolo_detection_count += 1
+                box = detection_info['box']
+                conf = detection_info['conf']
+                cls = detection_info['cls']
+                
+                if self.blur_method == 'pixelate':
+                    img = self.pixelate_region(img, box, self.pixel_size)
+                else:  # blur
+                    img = self.blur_region(img, box, self.pixel_size)
+            
+            # Save the processed image
+            base_name = os.path.splitext(image_path)[0]
+            yolo_processed_path = f"{base_name}_yolo_sliding_processed.jpg"
+            cv2.imwrite(yolo_processed_path, img)
+            
+            return yolo_processed_path
+            
+        except Exception as e:
+            print(f"Error in YOLO sliding window stage: {str(e)}")
+            return image_path
+    
+    def process_image(self, input_path, output_path):
+        """
+        Process a single image with comprehensive detection pipeline.
         
-        # Stage 2: YOLO sliding window detection and blurring
-        final_image = self.yolo_stage(
-            image_after_nudenet, 
-            yolo_confidence_threshold, 
-            pixel_size, 
-            blur_method
-        )
+        Args:
+            input_path (str): Path to input image
+            output_path (str): Path to output image
+            
+        Returns:
+            str: Path to processed image
+        """
+        # Print single message for new image being processed
+        print(f"Processing new image: {os.path.basename(input_path)}")
         
-        # Save the processed image
-        cv2.imwrite(output_path, final_image)
-        print(f"Two-stage processing complete! Output saved to: {output_path}")
+        # Validate configuration
+        if not self.nudenet_enabled and not self.yolo_enabled:
+            print("Error: At least one detection method must be enabled (NudeNet or YOLO)")
+            return None
         
-        return output_path
+        # Process the image through all stages
+        current_image_path = input_path
+        
+        # Stage 1: NudeNet full image detection and blurring (if enabled)
+        if self.nudenet_enabled:
+            current_image_path = self.nudenet_full_image_stage(current_image_path)
+        
+        # Stage 2: NudeNet sliding window detection and blurring (if enabled)
+        if self.nudenet_enabled:
+            current_image_path = self.nudenet_sliding_window_stage(current_image_path)
+        
+        # Stage 3: YOLO full image detection and blurring (if enabled)
+        if self.yolo_enabled:
+            current_image_path = self.yolo_full_image_stage(current_image_path)
+        
+        # Stage 4: YOLO sliding window detection and blurring (if enabled)
+        if self.yolo_enabled:
+            current_image_path = self.yolo_sliding_window_stage(current_image_path)
+        
+        # Save final result
+        try:
+            import cv2
+            import shutil
+            
+            # Create output directory if it doesn't exist
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Copy the final processed image to output path
+            shutil.copy2(current_image_path, output_path)
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error saving final result: {str(e)}")
+            return None
 
 
 def main():
     """Main function with command-line argument support."""
     parser = argparse.ArgumentParser(
-        description="Two-Stage Sliding Window Detection and Blurring Script",
+        description="Comprehensive Detection and Blurring Script with Two-Stage YOLO",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  %(prog)s input.jpg output.jpg
-  %(prog)s input.jpg --window-size 512 --stride 256
-  %(prog)s input.jpg --nudenet-confidence 0.2 --yolo-confidence 0.1
-  %(prog)s input.jpg --blur-method blur --pixel-size 20
+Two-Stage Sliding Window Detector with NudeNet and YOLO
+=====================================================
+
+This script implements a comprehensive detection pipeline:
+  Stage 1: NudeNet full image detection
+  Stage 2: NudeNet sliding window detection
+  Stage 3: YOLO full image detection
+  Stage 4: YOLO sliding window detection
+
+Usage examples:
+  # Full pipeline (all stages enabled)
+  python detect_slide.py input.jpg output.jpg
+  # NudeNet only (stages 1-2)
+  python detect_slide.py input.jpg output.jpg --use-yolo-two-stage=false
+  # YOLO only (stages 3-4)
+  python detect_slide.py input.jpg output.jpg --use-nudenet=false
+  # NudeNet full image only (stage 1)
+  python detect_slide.py input.jpg output.jpg --use-nudenet-two-stage=false --use-yolo-two-stage=false
+  # Custom parameters
+  python detect_slide.py input.jpg output.jpg --window-size 320 --stride 160 --nudenet-confidence 0.2 --yolo-confidence 0.3
         """
     )
     
@@ -551,8 +782,8 @@ Examples:
     parser.add_argument('--nudenet-model', default='../models/640m.onnx',
                        help='Path to NudeNet model (default: ../models/640m.onnx)')
     
-    parser.add_argument('--yolo-model', default='runs/detect/train8/weights/best.pt',
-                       help='Path to YOLO model (default: runs/detect/train8/weights/best.pt)')
+    parser.add_argument('--yolo-model', default='runs/detect/train15/weights/best.pt',
+                       help='Path to YOLO model (default: runs/detect/train15/weights/best.pt)')
     
     parser.add_argument('--window-size', type=int, default=640,
                        help='Sliding window size in pixels (default: 640)')
@@ -575,7 +806,33 @@ Examples:
     parser.add_argument('--blur-method', choices=['pixelate', 'blur'], default='pixelate',
                        help='Blurring method (default: pixelate)')
     
+    parser.add_argument('--no-nudenet', action='store_true',
+                       help='Disable NudeNet detection')
+    
+    parser.add_argument('--no-yolo', action='store_true',
+                       help='Disable YOLO detection')
+    
+    parser.add_argument('--yolo-only', action='store_true',
+                       help='Use only YOLO detection (disable NudeNet)')
+    
+    parser.add_argument('--nudenet-only', action='store_true',
+                       help='Use only NudeNet detection (disable YOLO)')
+    
+    parser.add_argument('--use-nudenet', action='store_true', default=True,
+                        help='Enable NudeNet detection (default: True)')
+    
+    parser.add_argument('--use-nudenet-two-stage', action='store_true', default=True,
+                        help='Enable two-stage NudeNet detection (full image + sliding window) (default: True)')
+    
+    parser.add_argument('--use-yolo-two-stage', action='store_true', default=True,
+                        help='Enable two-stage YOLO detection (full image + sliding window) (default: True)')
+    
     args = parser.parse_args()
+    
+    # Determine which detection methods to use
+    use_nudenet = not args.no_nudenet and not args.yolo_only
+    use_nudenet_two_stage = use_nudenet and args.use_nudenet_two_stage
+    use_yolo_two_stage = not args.no_yolo and not args.nudenet_only and args.use_yolo_two_stage
     
     # Initialize detector
     detector = TwoStageSlidingWindowDetector(
@@ -583,17 +840,19 @@ Examples:
         yolo_model_path=args.yolo_model,
         window_size=args.window_size,
         stride=args.stride,
-        overlap_threshold=args.overlap_threshold
+        overlap_threshold=args.overlap_threshold,
+        nudenet_enabled=use_nudenet,
+        yolo_enabled=use_yolo_two_stage,
+        nudenet_confidence_threshold=args.nudenet_confidence,
+        yolo_confidence_threshold=args.yolo_confidence,
+        blur_method=args.blur_method,
+        pixel_size=args.pixel_size
     )
     
     # Process the image
     output_path = detector.process_image(
         input_path=args.input,
-        output_path=args.output,
-        pixel_size=args.pixel_size,
-        nudenet_confidence_threshold=args.nudenet_confidence,
-        yolo_confidence_threshold=args.yolo_confidence,
-        blur_method=args.blur_method
+        output_path=args.output
     )
     
     print(f"Processing complete! Output saved to: {output_path}")
@@ -602,24 +861,20 @@ Examples:
 if __name__ == "__main__":
     # Example usage without command line arguments
     if len(sys.argv) == 1:
-        # Use default settings for the example image
+        # Use default settings for the example image with two-stage YOLO
         detector = TwoStageSlidingWindowDetector(
             nudenet_model_path="../models/640m.onnx",
-            yolo_model_path="runs/detect/train8/weights/best.pt",
-            window_size=640,
-            stride=320,
-            overlap_threshold=0.3
+            yolo_model_path="runs/detect/train15/weights/best.pt",
+            window_size=160,
+            stride=120,
+            overlap_threshold=0.5
         )
         
         result = detector.process_image(
-            input_path="../data/Teen-Porn-Video-55.jpg",
-            output_path="blurred_two_stage.jpg",
-            pixel_size=15,
-            nudenet_confidence_threshold=0.1,
-            yolo_confidence_threshold=0.1,
-            blur_method='pixelate'
+            input_path="../data/apetube.jpg",
+            output_path="blurred_comprehensive.jpg"
         )
         
-        print(f"Default two-stage processing complete! Output saved to: {result}")
+        print(f"Default comprehensive processing complete! Output saved to: {result}")
     else:
         main()

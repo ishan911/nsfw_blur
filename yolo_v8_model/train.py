@@ -7,7 +7,7 @@ model = YOLO("yolov8n.pt")
 
 # Training with comprehensive data augmentation
 model.train(
-    data="../models/penis_model/train.yaml", 
+    data="train.yaml", 
     epochs=50, 
     imgsz=1280, 
     device=device, 

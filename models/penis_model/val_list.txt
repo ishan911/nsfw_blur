@@ -66,3 +66,9 @@
 ./images/val/65.png
 ./images/val/66.png
 ./images/val/67.png
+./images/val/68.png
+./images/val/69.png
+./images/val/70.png
+./images/val/71.png
+./images/val/72.png
+./images/val/73.png

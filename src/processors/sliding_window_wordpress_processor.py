@@ -17,20 +17,21 @@ from ..blurrer import SlidingWindowBlurrer
 
 class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor):
     def __init__(self, json_url=None, json_file=None, base_url=None, model_path='models/640m.onnx', 
-                 database_path='data/processed_images.json', window_size=640, stride=320, overlap_threshold=0.3):
+                 database_path='data/processed_images.json', window_size=640, stride=320, overlap_threshold=0.3,
+                 yolo_model_path=None):
         """Initialize sliding window WordPress image processor for existing images."""
-        # Initialize parent without creating the blurrer
-        self.model_path = model_path
-        self.database_path = database_path
-        self.processed_images = self.load_database()
-        self.json_url = json_url
-        self.json_file = json_file
-        self.base_url = base_url.rstrip('/') if base_url else None
-        
-        # Sliding window parameters
-        self.window_size = window_size
-        self.stride = stride
-        self.overlap_threshold = overlap_threshold
+        # Call parent constructor with YOLO model path
+        super().__init__(
+            json_url=json_url,
+            json_file=json_file,
+            base_url=base_url,
+            model_path=model_path,
+            database_path=database_path,
+            window_size=window_size,
+            stride=stride,
+            overlap_threshold=overlap_threshold,
+            yolo_model_path=yolo_model_path
+        )
         
         # Initialize the sliding window blurrer
         self.blurrer = SlidingWindowBlurrer(
@@ -161,8 +162,10 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
         return wp_path
     
     def process_wordpress_json_images(self, output_dir="data/wordpress_processed", pixel_size=10, 
-                                    confidence_threshold=0.1, force=False, debug=False):
-        """Process existing images from WordPress uploads folder using JSON data."""
+                                    confidence_threshold=0.1, force=False, debug=False,
+                                    use_nudenet_two_stage=True, use_yolo_two_stage=True, 
+                                    yolo_confidence_threshold=0.1, blur_method='pixelate'):
+        """Process existing images from WordPress uploads folder using comprehensive four-stage detection pipeline."""
         if debug:
             print("Fetching JSON data...")
         json_data = self.fetch_json_data()
@@ -175,6 +178,25 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
             print(f"Found {len(json_data)} items in JSON data")
             print(f"Using sliding window: {self.window_size}x{self.window_size}, stride={self.stride}")
             print("Processing existing images from wp-content/uploads folder (skipping remote URLs)...")
+        
+        # Display detection configuration
+        print("=== Four-Stage Detection Configuration ===")
+        stage_count = 0
+        if use_nudenet_two_stage:
+            stage_count += 1
+            print(f"  {stage_count}. NudeNet full image detection (confidence ≥ {confidence_threshold})")
+            stage_count += 1
+            print(f"  {stage_count}. NudeNet sliding window detection (confidence ≥ {confidence_threshold})")
+        
+        if use_yolo_two_stage:
+            stage_count += 1
+            print(f"  {stage_count}. YOLO full image detection (confidence ≥ {yolo_confidence_threshold})")
+            stage_count += 1
+            print(f"  {stage_count}. YOLO sliding window detection (confidence ≥ {yolo_confidence_threshold})")
+        
+        print(f"  Blur method: {blur_method}")
+        print(f"  Pixel size: {pixel_size}")
+        print()
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -241,7 +263,7 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
                 # Generate output path (same as original for in-place processing)
                 output_path = local_image_path
                 
-                # Process the image with sliding window
+                # Process the image with four-stage detection pipeline
                 try:
                     result = self.process_single_image(
                         input_path=local_image_path,
@@ -249,7 +271,11 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
                         pixel_size=pixel_size,
                         confidence_threshold=confidence_threshold,
                         force=force,
-                        image_type=image_type
+                        image_type=image_type,
+                        use_nudenet_two_stage=use_nudenet_two_stage,
+                        use_yolo_two_stage=use_yolo_two_stage,
+                        yolo_confidence_threshold=yolo_confidence_threshold,
+                        blur_method=blur_method
                     )
                     if result:
                         processed_count += 1
@@ -283,7 +309,7 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
         
         # Print final summary
         print(f"\n{'='*60}")
-        print(f"WordPress image processing complete:")
+        print(f"Four-stage WordPress image processing complete:")
         print(f"  Total items: {len(json_data)}")
         print(f"  Total images found in JSON: {total_images}")
         print(f"  Local images found: {found_count}")
@@ -293,4 +319,16 @@ class SlidingWindowWordPressImageProcessor(SlidingWindowCustomJSONImageProcessor
         print(f"  Errors: {error_count} images")
         print(f"  Window size: {self.window_size}x{self.window_size}")
         print(f"  Stride: {self.stride} ({(self.window_size - self.stride) / self.stride * 100:.1f}% overlap)")
-        print(f"  Backups created in: wp-content/uploads/backup/") 
+        print(f"  Backups created in: wp-content/uploads/backup/")
+        
+        # Display detection summary
+        if use_nudenet_two_stage:
+            print(f"  NudeNet two-stage: Enabled")
+            print(f"  NudeNet confidence: {confidence_threshold}")
+        if use_yolo_two_stage:
+            print(f"  YOLO two-stage: Enabled")
+            print(f"  YOLO model: {self.yolo_model_path}")
+            print(f"  YOLO confidence: {yolo_confidence_threshold}")
+        print(f"  Blur method: {blur_method}")
+        print(f"  Pixel size: {pixel_size}")
+        print(f"  WordPress sizing: Enabled (screenshot_full_url → 170x145, 250x212 | review_full_image → 590x504)") 

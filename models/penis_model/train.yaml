@@ -1,7 +1,9 @@
 path: /Users/ishanjayman/MrGeek/Projects/Daniel/AI/BlurImages/blurapi/models/penis_model
 train: train_list.txt
 val: val_list.txt
-nc: 2
+nc: 4
 names:
 - MALE_GENITALIA_EXPOSED
 - NOT_NUDE
+- FEMALE_GENITALIA_EXPOSED
+- ANUS_EXPOSED

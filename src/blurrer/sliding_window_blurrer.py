@@ -568,7 +568,7 @@ class SlidingWindowBlurrer:
         x, y, w, h = region
         
         # Add 10px extra to all 4 sides
-        extra_padding = 3
+        extra_padding = 0
         x_expanded = max(0, x - extra_padding)
         y_expanded = max(0, y - extra_padding)
         w_expanded = min(w + 2 * extra_padding, image.width - x_expanded)

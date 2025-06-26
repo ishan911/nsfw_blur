@@ -1,7 +1,7 @@
 import cv2
 from ultralytics import YOLO
 
-model = YOLO("runs/detect/train8/weights/best.pt")
+model = YOLO("runs/detect/train13/weights/best.pt")
 results = model("../data/Teen-Porn-Video-55.jpg")[0]
 
 img = cv2.imread("../data/Teen-Porn-Video-55.jpg")

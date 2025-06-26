@@ -57,7 +57,7 @@ def process_image(input_path, output_path, model):
 
 def main():
     # Initialize YOLO model
-    model = YOLO("runs/detect/train8/weights/best.pt")
+    model = YOLO("runs/detect/train15/weights/best.pt")
     
     # Define input and output paths
     input_folder = "../data/custom_downloads"
