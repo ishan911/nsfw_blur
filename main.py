@@ -2,7 +2,7 @@
 """
 Enhanced Image Processing Script with NudeNet and YOLO Detection
 This script combines NudeNet detection with YOLO detection for comprehensive content filtering.
-Includes WordPress sizing and folder structure support.
+Includes WordPress sizing and folder structure support with database tracking.
 """
 
 import os
@@ -10,11 +10,14 @@ import sys
 import argparse
 import json
 import requests
+import hashlib
+from datetime import datetime
 from pathlib import Path
 import cv2
 from PIL import Image
 from nudenet_detector import NudeNetDetector
 from ultralytics import YOLO
+import numpy as np
 
 # WordPress image sizes configuration
 WORDPRESS_SIZES = {
@@ -22,6 +25,118 @@ WORDPRESS_SIZES = {
     'category-thumb': (250, 212, True),  # 250x212, cropped
     'swiper-desktop': (590, 504, False)  # 590x504, not cropped
 }
+
+class DatabaseTracker:
+    """Simple database tracker for processed images."""
+    
+    def __init__(self, database_path='data/processed_images.json'):
+        self.database_path = database_path
+        self.processed_images = self.load_database()
+    
+    def load_database(self):
+        """Load the processed images database."""
+        try:
+            if os.path.exists(self.database_path):
+                with open(self.database_path, 'r') as f:
+                    return json.load(f)
+            else:
+                # Create directory if it doesn't exist
+                os.makedirs(os.path.dirname(self.database_path), exist_ok=True)
+                return {}
+        except Exception as e:
+            print(f"Warning: Could not load database: {e}")
+            return {}
+    
+    def save_database(self):
+        """Save the processed images database."""
+        try:
+            with open(self.database_path, 'w') as f:
+                json.dump(self.processed_images, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save database: {e}")
+    
+    def get_file_hash(self, file_path):
+        """Generate a hash for the file to detect changes."""
+        try:
+            with open(file_path, 'rb') as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception as e:
+            print(f"Warning: Could not generate hash for {file_path}: {e}")
+            return None
+    
+    def is_already_processed(self, input_path, output_path, pixel_size=15, confidence_threshold=0.05):
+        """Check if an image has already been processed with the same settings."""
+        if input_path not in self.processed_images:
+            return False
+        
+        record = self.processed_images[input_path]
+        
+        # Check if output file still exists
+        if not os.path.exists(record['output_path']):
+            return False
+        
+        # Check if file hash has changed (file was modified)
+        current_hash = self.get_file_hash(input_path)
+        if current_hash != record['file_hash']:
+            return False
+        
+        # Check if processing settings are the same
+        if (record['pixel_size'] != pixel_size or 
+            record['output_path'] != output_path or
+            record.get('confidence_threshold') != confidence_threshold):
+            return False
+        
+        return True
+    
+    def record_processed_image(self, input_path, output_path, pixel_size=15, confidence_threshold=0.05, 
+                             nudenet_detections=0, yolo_detections=0, wordpress_files=None, image_type=None):
+        """Record a processed image in the database."""
+        file_hash = self.get_file_hash(input_path)
+        
+        self.processed_images[input_path] = {
+            'output_path': output_path,
+            'file_hash': file_hash,
+            'pixel_size': pixel_size,
+            'confidence_threshold': confidence_threshold,
+            'nudenet_detections': nudenet_detections,
+            'yolo_detections': yolo_detections,
+            'wordpress_files': wordpress_files or [],
+            'image_type': image_type,
+            'processed_at': datetime.now().isoformat(),
+            'file_size': os.path.getsize(input_path) if os.path.exists(input_path) else 0
+        }
+        
+        self.save_database()
+        print(f"  📝 Recorded in database: {os.path.basename(input_path)}")
+    
+    def get_processing_stats(self):
+        """Get statistics about processed images."""
+        total_images = len(self.processed_images)
+        total_size = sum(record.get('file_size', 0) for record in self.processed_images.values())
+        total_nudenet = sum(record.get('nudenet_detections', 0) for record in self.processed_images.values())
+        total_yolo = sum(record.get('yolo_detections', 0) for record in self.processed_images.values())
+        
+        print(f"\n📊 Database Statistics:")
+        print(f"  Total images processed: {total_images}")
+        print(f"  Total size processed: {total_size / (1024*1024):.2f} MB")
+        print(f"  Total NudeNet detections: {total_nudenet}")
+        print(f"  Total YOLO detections: {total_yolo}")
+        
+        if total_images > 0:
+            # Show recent processing
+            recent = sorted(
+                self.processed_images.items(),
+                key=lambda x: x[1]['processed_at'],
+                reverse=True
+            )[:5]
+            
+            print(f"  Recent processing:")
+            for input_path, record in recent:
+                filename = os.path.basename(input_path)
+                print(f"    {filename} -> {os.path.basename(record['output_path'])} ({record['processed_at'][:19]})")
+
+# Initialize database tracker
+db_tracker = DatabaseTracker()
 
 def download_image(url, download_dir="downloads"):
     """
@@ -213,7 +328,201 @@ def create_wordpress_sizes(original_image_path, processed_image_path, base_filen
     
     return created_files
 
-def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None):
+def create_wordpress_sizes_with_pixelation(original_image_path, detections, base_filename, image_type=None, pixel_size=15):
+    """
+    Create WordPress-sized images with consistent pixelation applied after resizing.
+    
+    Args:
+        original_image_path (str): Path to original image
+        detections (list): List of detection dictionaries from NudeNet
+        base_filename (str): Base filename without extension
+        image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
+        pixel_size (int): Pixel size to maintain across all image sizes
+        
+    Returns:
+        List of created file paths
+    """
+    created_files = []
+    
+    # Determine which sizes to create based on image type
+    if image_type == 'review_full_image':
+        # Only create swiper-desktop size (590x504)
+        sizes_to_create = ['swiper-desktop']
+    elif image_type == 'screenshot_full_url':
+        # Only create blog-tn and category-thumb sizes (170x145, 250x212)
+        sizes_to_create = ['blog-tn', 'category-thumb']
+    else:
+        # Default: create all sizes
+        sizes_to_create = list(WORDPRESS_SIZES.keys())
+    
+    # Detect original image format
+    original_format = 'JPEG'  # Default
+    if original_image_path.lower().endswith('.png'):
+        original_format = 'PNG'
+    elif original_image_path.lower().endswith(('.jpg', '.jpeg')):
+        original_format = 'JPEG'
+    
+    # Determine file extension and save parameters
+    if original_format.upper() == 'PNG':
+        file_extension = '.png'
+        save_format = 'PNG'
+        save_kwargs = {}
+    else:
+        file_extension = '.jpg'
+        save_format = 'JPEG'
+        save_kwargs = {'quality': 85}
+    
+    # Load the original image
+    original_image = Image.open(original_image_path)
+    original_width, original_height = original_image.size
+    
+    for size_name in sizes_to_create:
+        width, height, crop = WORDPRESS_SIZES[size_name]
+        
+        # First, resize the original image
+        resized_image = resize_image(original_image, (width, height), crop)
+        
+        # Calculate scale factors for detection coordinates
+        if crop:
+            # For cropped images, calculate the scale factor based on the resize operation
+            scale_x = width / original_width
+            scale_y = height / original_height
+            scale_factor = max(scale_x, scale_y)  # Use the larger scale factor for cropping
+        else:
+            # For non-cropped images, calculate scale factor
+            scale_x = width / original_width
+            scale_y = height / original_height
+            scale_factor = min(scale_x, scale_y)  # Use the smaller scale factor to fit within bounds
+        
+        # Scale detection coordinates to the resized image
+        scaled_detections = []
+        for detection in detections:
+            if detection['score'] > 0.1:  # Apply confidence threshold
+                x, y, w, h = detection['box']
+                
+                # Scale coordinates to the resized image
+                scaled_x = int(x * scale_factor)
+                scaled_y = int(y * scale_factor)
+                scaled_w = int(w * scale_factor)
+                scaled_h = int(h * scale_factor)
+                
+                # Ensure coordinates are within bounds
+                scaled_x = max(0, min(scaled_x, width - 1))
+                scaled_y = max(0, min(scaled_y, height - 1))
+                scaled_w = max(1, min(scaled_w, width - scaled_x))
+                scaled_h = max(1, min(scaled_h, height - scaled_y))
+                
+                scaled_detections.append({
+                    'box': [scaled_x, scaled_y, scaled_w, scaled_h],
+                    'score': detection['score'],
+                    'class': detection['class']
+                })
+        
+        # Apply pixelation to the resized image using the same pixel_size
+        if scaled_detections:
+            # Convert PIL image to OpenCV format for pixelation
+            resized_cv = cv2.cvtColor(np.array(resized_image), cv2.COLOR_RGB2BGR)
+            
+            # Apply pixelation to each detection
+            for detection in scaled_detections:
+                x, y, w, h = detection['box']
+                
+                # Add 5px padding (scaled)
+                padding = max(1, int(5 * scale_factor))
+                x1 = max(0, x - padding)
+                y1 = max(0, y - padding)
+                x2 = min(width, x + w + padding)
+                y2 = min(height, y + h + padding)
+                
+                # Pixelate the region
+                resized_cv = pixelate_region_cv(resized_cv, x1, y1, x2, y2, pixel_size)
+            
+            # Convert back to PIL
+            resized_image = Image.fromarray(cv2.cvtColor(resized_cv, cv2.COLOR_BGR2RGB))
+        
+        # Generate filename with correct extension
+        if size_name == 'blog-tn':
+            filename = f"{base_filename}-170x145{file_extension}"
+        elif size_name == 'category-thumb':
+            filename = f"{base_filename}-250x212{file_extension}"
+        elif size_name == 'swiper-desktop':
+            filename = f"{base_filename}-590x504{file_extension}"
+        else:
+            filename = f"{base_filename}-{width}x{height}{file_extension}"
+        
+        # Determine output directory based on image type
+        if image_type == 'review_full_image':
+            # Save in wp-content/uploads/screenshots
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+        else:
+            # Save in wp-content/uploads
+            wp_upload_dir = os.path.join('wp-content', 'uploads')
+        
+        # Create output directory
+        os.makedirs(wp_upload_dir, exist_ok=True)
+        
+        # Save resized image with correct format
+        output_path = os.path.join(wp_upload_dir, filename)
+        resized_image.save(output_path, save_format, **save_kwargs)
+        created_files.append(output_path)
+        print(f"  Created {size_name} size: {filename} (pixel_size: {pixel_size}, detections: {len(scaled_detections)})")
+    
+    return created_files
+
+def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
+    """
+    Pixelate a region of an OpenCV image.
+    
+    Args:
+        img (np.ndarray): Input OpenCV image
+        x1, y1, x2, y2 (int): Bounding box coordinates
+        pixel_size (int): Size of each pixel block (higher = more pixelated)
+        
+    Returns:
+        np.ndarray: Image with pixelated region
+    """
+    try:
+        # Extract the region to pixelate
+        region = img[y1:y2, x1:x2]
+        
+        if region.size == 0:
+            return img
+        
+        # Get dimensions of the region
+        h, w = region.shape[:2]
+        
+        # Calculate new dimensions for pixelation
+        new_h = h // pixel_size
+        new_w = w // pixel_size
+        
+        if new_h == 0 or new_w == 0:
+            # If region is too small, use a smaller pixel size
+            pixel_size = min(h, w) // 2
+            if pixel_size < 2:
+                pixel_size = 2
+            new_h = h // pixel_size
+            new_w = w // pixel_size
+        
+        # Resize down to create pixelation effect
+        if new_h > 0 and new_w > 0:
+            # Use INTER_AREA for downsampling (better for pixelation)
+            pixelated = cv2.resize(region, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            # Resize back up to original size
+            pixelated = cv2.resize(pixelated, (w, h), interpolation=cv2.INTER_NEAREST)
+        else:
+            # Fallback for very small regions
+            pixelated = region
+        
+        # Replace the region in the original image
+        img[y1:y2, x1:x2] = pixelated
+        
+        return img
+        
+    except Exception as e:
+        print(f"Error pixelating region: {e}")
+        return img
+
+def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False):
     """
     Process a single image with both NudeNet and YOLO detection.
     
@@ -223,12 +532,30 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         nudenet_detector (NudeNetDetector): NudeNet detector instance
         yolo_model (YOLO): YOLO model instance
         image_type (str): Type of image for WordPress sizing
+        force (bool): Force reprocessing even if already processed
         
     Returns:
         dict: Processing results
     """
     try:
         print(f"Processing: {input_path}")
+        
+        # Check if already processed (unless force is True)
+        if not force and db_tracker.is_already_processed(input_path, output_path):
+            record = db_tracker.processed_images[input_path]
+            print(f"  ⏭️  Already processed: {os.path.basename(input_path)}")
+            print(f"    Output: {os.path.basename(record['output_path'])}")
+            print(f"    Processed: {record['processed_at'][:19]}")
+            print(f"    NudeNet detections: {record['nudenet_detections']}")
+            print(f"    YOLO detections: {record['yolo_detections']}")
+            return {
+                'success': True,
+                'nudenet_detections': record['nudenet_detections'],
+                'yolo_detections': record['yolo_detections'],
+                'total_detections': record['nudenet_detections'] + record['yolo_detections'],
+                'wordpress_files': record.get('wordpress_files', []),
+                'message': f"Already processed - NudeNet: {record['nudenet_detections']}, YOLO: {record['yolo_detections']}"
+            }
         
         # Step 1: NudeNet detection and pixelation
         print("  Running NudeNet detection...")
@@ -270,8 +597,26 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         # Step 3: Create WordPress sizes
         print("  Creating WordPress sizes...")
         base_filename = os.path.splitext(os.path.basename(output_path))[0]
-        created_files = create_wordpress_sizes(input_path, output_path, base_filename, image_type)
+        created_files = create_wordpress_sizes_with_pixelation(
+            input_path, 
+            nudenet_result['detections'], 
+            base_filename, 
+            image_type,
+            nudenet_detector.pixel_size
+        )
         print(f"  Created {len(created_files)} WordPress-sized images")
+        
+        # Step 4: Record in database
+        db_tracker.record_processed_image(
+            input_path=input_path,
+            output_path=output_path,
+            pixel_size=nudenet_detector.pixel_size,
+            confidence_threshold=nudenet_detector.confidence_threshold,
+            nudenet_detections=nudenet_result['detection_count'],
+            yolo_detections=len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0,
+            wordpress_files=created_files,
+            image_type=image_type
+        )
         
         return {
             'success': True,
@@ -514,7 +859,8 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                     output_path, 
                     nudenet_detector, 
                     yolo_model,
-                    image_type
+                    image_type,
+                    force
                 )
                 
                 if result['success']:
@@ -540,6 +886,10 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
             print(f"Processed: {processed_count}")
             print(f"Skipped: {skipped_count}")
         print(f"Errors: {error_count}")
+        
+        # Show database statistics
+        if not download_only:
+            db_tracker.get_processing_stats()
         
         return {
             'success': True,
