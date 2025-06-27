@@ -673,7 +673,7 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
             print("Initializing detectors...")
             nudenet_detector = NudeNetDetector(
                 confidence_threshold=0.05,
-                pixel_size=15,
+                pixel_size=10,
                 padding=5
             )
             
