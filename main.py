@@ -269,6 +269,9 @@ def create_wordpress_sizes(original_image_path, processed_image_path, base_filen
     elif image_type == 'screenshot_full_url':
         # Only create blog-tn and category-thumb sizes (170x145, 250x212)
         sizes_to_create = ['blog-tn', 'category-thumb']
+    elif image_type == 'category_thumb':
+        # For category thumbnails, create category-thumb size (250x212)
+        sizes_to_create = ['category-thumb']
     else:
         # Default: create all sizes
         sizes_to_create = list(WORDPRESS_SIZES.keys())
@@ -313,6 +316,9 @@ def create_wordpress_sizes(original_image_path, processed_image_path, base_filen
         if image_type == 'review_full_image':
             # Save in wp-content/uploads/screenshots
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+        elif image_type == 'category_thumb':
+            # Save in wp-content/uploads/cthumbnails
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'cthumbnails')
         else:
             # Save in wp-content/uploads
             wp_upload_dir = os.path.join('wp-content', 'uploads')
@@ -351,6 +357,9 @@ def create_wordpress_sizes_with_pixelation(original_image_path, detections, base
     elif image_type == 'screenshot_full_url':
         # Only create blog-tn and category-thumb sizes (170x145, 250x212)
         sizes_to_create = ['blog-tn', 'category-thumb']
+    elif image_type == 'category_thumb':
+        # For category thumbnails, create category-thumb size (250x212)
+        sizes_to_create = ['category-thumb']
     else:
         # Default: create all sizes
         sizes_to_create = list(WORDPRESS_SIZES.keys())
@@ -454,6 +463,9 @@ def create_wordpress_sizes_with_pixelation(original_image_path, detections, base
         if image_type == 'review_full_image':
             # Save in wp-content/uploads/screenshots
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+        elif image_type == 'category_thumb':
+            # Save in wp-content/uploads/cthumbnails
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'cthumbnails')
         else:
             # Save in wp-content/uploads
             wp_upload_dir = os.path.join('wp-content', 'uploads')
@@ -471,12 +483,12 @@ def create_wordpress_sizes_with_pixelation(original_image_path, detections, base
 
 def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
     """
-    Pixelate a region of an OpenCV image.
+    Pixelate a region of an OpenCV image with fixed pixel size.
     
     Args:
         img (np.ndarray): Input OpenCV image
         x1, y1, x2, y2 (int): Bounding box coordinates
-        pixel_size (int): Size of each pixel block (higher = more pixelated)
+        pixel_size (int): Fixed size of each pixel block (higher = more pixelated)
         
     Returns:
         np.ndarray: Image with pixelated region
@@ -491,17 +503,20 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         # Get dimensions of the region
         h, w = region.shape[:2]
         
+        # Use fixed pixel size - don't adapt based on region size
         # Calculate new dimensions for pixelation
         new_h = h // pixel_size
         new_w = w // pixel_size
         
+        # If region is too small for the pixel size, use the smallest possible pixel size
         if new_h == 0 or new_w == 0:
-            # If region is too small, use a smaller pixel size
-            pixel_size = min(h, w) // 2
-            if pixel_size < 2:
-                pixel_size = 2
-            new_h = h // pixel_size
-            new_w = w // pixel_size
+            # Use minimum pixel size of 2, but don't change the original pixel_size
+            min_pixel_size = max(2, min(h, w) // 2)
+            new_h = h // min_pixel_size
+            new_w = w // min_pixel_size
+            print(f"    Warning: Region too small for pixel_size {pixel_size}, using {min_pixel_size} for this region")
+        else:
+            min_pixel_size = pixel_size
         
         # Resize down to create pixelation effect
         if new_h > 0 and new_w > 0:
@@ -673,8 +688,8 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
             print("Initializing detectors...")
             nudenet_detector = NudeNetDetector(
                 confidence_threshold=0.05,
-                pixel_size=10,
-                padding=5
+                pixel_size=15,
+                padding=10
             )
             
             yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
@@ -907,12 +922,207 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
             'message': f"Error: {str(e)}"
         }
 
+def category_thumbnails(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False):
+    """
+    Process category thumbnail images from a JSON URL.
+    
+    Args:
+        json_url (str): URL to JSON file containing category thumbnail data
+        output_dir (str): Directory to save processed images
+        base_url (str): Base URL for converting relative paths to absolute URLs
+        force (bool): Force reprocessing even if output already exists
+        download_only (bool): Only download images, do not process them
+        
+    Returns:
+        dict: Processing summary
+    """
+    try:
+        print(f"=== Category Thumbnails Processing ===")
+        print(f"JSON URL: {json_url}")
+        print(f"Output directory: {output_dir}")
+        print(f"Base URL: {base_url}")
+        print(f"Force reprocessing: {force}")
+        print(f"Download only: {download_only}")
+        print()
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Download JSON data
+        print("Downloading JSON data...")
+        response = requests.get(json_url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        print(f"JSON data loaded successfully")
+        
+        # Initialize detectors
+        if not download_only:
+            print("Initializing detectors...")
+            nudenet_detector = NudeNetDetector(
+                confidence_threshold=0.05,
+                pixel_size=15,
+                padding=10
+            )
+            
+            yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+            print("Detectors initialized successfully")
+        
+        # Process images
+        processed_count = 0
+        skipped_count = 0
+        error_count = 0
+        download_count = 0
+        
+        # Extract image URLs from JSON data
+        image_urls = []
+        
+        # Handle the category thumbnails JSON structure
+        if isinstance(data, list):
+            # Direct list structure: [{"term_id": 1364, "count": 14, "slug": "...", "thumb": "..."}, ...]
+            for item in data:
+                if isinstance(item, dict) and 'thumb' in item:
+                    url = item['thumb']
+                    if url:
+                        # Handle relative URLs with base_url
+                        if base_url and not url.startswith(('http://', 'https://')):
+                            url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                        image_urls.append({
+                            'url': url,
+                            'type': 'category_thumb',
+                            'term_id': item.get('term_id', 'unknown'),
+                            'slug': item.get('slug', 'unknown'),
+                            'count': item.get('count', 0)
+                        })
+        
+        elif isinstance(data, dict):
+            # Check for nested structures
+            if 'data' in data and isinstance(data['data'], list):
+                # Structure: {"data": [{"term_id": 1364, "count": 14, "slug": "...", "thumb": "..."}, ...]}
+                for item in data['data']:
+                    if isinstance(item, dict) and 'thumb' in item:
+                        url = item['thumb']
+                        if url:
+                            if base_url and not url.startswith(('http://', 'https://')):
+                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                            image_urls.append({
+                                'url': url,
+                                'type': 'category_thumb',
+                                'term_id': item.get('term_id', 'unknown'),
+                                'slug': item.get('slug', 'unknown'),
+                                'count': item.get('count', 0)
+                            })
+            
+            elif 'thumbnails' in data and isinstance(data['thumbnails'], list):
+                # Structure: {"thumbnails": [{"term_id": 1364, "count": 14, "slug": "...", "thumb": "..."}, ...]}
+                for item in data['thumbnails']:
+                    if isinstance(item, dict) and 'thumb' in item:
+                        url = item['thumb']
+                        if url:
+                            if base_url and not url.startswith(('http://', 'https://')):
+                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                            image_urls.append({
+                                'url': url,
+                                'type': 'category_thumb',
+                                'term_id': item.get('term_id', 'unknown'),
+                                'slug': item.get('slug', 'unknown'),
+                                'count': item.get('count', 0)
+                            })
+        
+        print(f"Found {len(image_urls)} category thumbnail URLs to process")
+        
+        for i, image_data in enumerate(image_urls, 1):
+            try:
+                print(f"\n[{i}/{len(image_urls)}] Processing: {image_data['url']}")
+                print(f"  Term ID: {image_data['term_id']}, Slug: {image_data['slug']}, Count: {image_data['count']}")
+                
+                # Download image
+                downloaded_path = download_image(image_data['url'])
+                if not downloaded_path:
+                    error_count += 1
+                    continue
+                
+                download_count += 1
+                
+                if download_only:
+                    continue
+                
+                # Determine output path with WordPress structure for category thumbnails
+                filename = os.path.basename(downloaded_path)
+                
+                # Save in wp-content/uploads/cthumbnails
+                wp_upload_dir = os.path.join('wp-content', 'uploads', 'cthumbnails')
+                output_path = os.path.join(wp_upload_dir, filename)
+                
+                # Create output directory
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                
+                # Check if already processed
+                if os.path.exists(output_path) and not force:
+                    print(f"  Skipped (already exists): {output_path}")
+                    skipped_count += 1
+                    continue
+                
+                # Process the image
+                result = process_single_image(
+                    downloaded_path, 
+                    output_path, 
+                    nudenet_detector, 
+                    yolo_model,
+                    None,  # No image_type for category thumbnails (skip WordPress sizing)
+                    force
+                )
+                
+                if result['success']:
+                    processed_count += 1
+                    print(f"  Success: {output_path}")
+                    print(f"    NudeNet detections: {result['nudenet_detections']}")
+                    print(f"    YOLO detections: {result['yolo_detections']}")
+                    print(f"    WordPress files: {len(result['wordpress_files'])}")
+                else:
+                    error_count += 1
+                    print(f"  Failed: {result['message']}")
+                
+            except Exception as e:
+                error_count += 1
+                print(f"  Error processing {image_data['url']}: {e}")
+                continue
+        
+        # Summary
+        print(f"\n=== Category Thumbnails Processing Summary ===")
+        print(f"Total thumbnails: {len(image_urls)}")
+        print(f"Downloaded: {download_count}")
+        if not download_only:
+            print(f"Processed: {processed_count}")
+            print(f"Skipped: {skipped_count}")
+        print(f"Errors: {error_count}")
+        
+        # Show database statistics
+        if not download_only:
+            db_tracker.get_processing_stats()
+        
+        return {
+            'success': True,
+            'total_thumbnails': len(image_urls),
+            'downloaded': download_count,
+            'processed': processed_count if not download_only else 0,
+            'skipped': skipped_count if not download_only else 0,
+            'errors': error_count
+        }
+        
+    except Exception as e:
+        print(f"Error in category_thumbnails: {e}")
+        return {
+            'success': False,
+            'message': f"Error: {str(e)}"
+        }
+
 def main():
     """
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
-    parser.add_argument('command', choices=['sliding-json'], help='Command to execute')
+    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails'], help='Command to execute')
     parser.add_argument('--json-url', required=True, help='URL to JSON file containing image data')
     parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--base-url', help='Base URL for converting relative paths to absolute URLs')
@@ -923,6 +1133,21 @@ def main():
     
     if args.command == 'sliding-json':
         result = sliding_json(
+            json_url=args.json_url,
+            output_dir=args.output_dir,
+            base_url=args.base_url,
+            force=args.force,
+            download_only=args.download_only
+        )
+        
+        if not result['success']:
+            print(f"❌ {result['message']}")
+            return 1
+        
+        print("✅ Processing completed successfully!")
+        return 0
+    elif args.command == 'category-thumbnails':
+        result = category_thumbnails(
             json_url=args.json_url,
             output_dir=args.output_dir,
             base_url=args.base_url,

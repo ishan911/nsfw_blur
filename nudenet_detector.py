@@ -265,12 +265,12 @@ class NudeNetDetector:
     
     def pixelate_region(self, img, x1, y1, x2, y2, pixel_size=10):
         """
-        Pixelate a region of an image.
+        Pixelate a region of an image with fixed pixel size.
         
         Args:
             img (np.ndarray): Input image
             x1, y1, x2, y2 (int): Bounding box coordinates
-            pixel_size (int): Size of each pixel block (higher = more pixelated)
+            pixel_size (int): Fixed size of each pixel block (higher = more pixelated)
             
         Returns:
             np.ndarray: Image with pixelated region
@@ -285,17 +285,20 @@ class NudeNetDetector:
             # Get dimensions of the region
             h, w = region.shape[:2]
             
+            # Use fixed pixel size - don't adapt based on region size
             # Calculate new dimensions for pixelation
             new_h = h // pixel_size
             new_w = w // pixel_size
             
+            # If region is too small for the pixel size, use the smallest possible pixel size
             if new_h == 0 or new_w == 0:
-                # If region is too small, use a smaller pixel size
-                pixel_size = min(h, w) // 2
-                if pixel_size < 2:
-                    pixel_size = 2
-                new_h = h // pixel_size
-                new_w = w // pixel_size
+                # Use minimum pixel size of 2, but don't change the original pixel_size
+                min_pixel_size = max(2, min(h, w) // 2)
+                new_h = h // min_pixel_size
+                new_w = w // min_pixel_size
+                print(f"    Warning: Region too small for pixel_size {pixel_size}, using {min_pixel_size} for this region")
+            else:
+                min_pixel_size = pixel_size
             
             # Resize down to create pixelation effect
             if new_h > 0 and new_w > 0:
@@ -572,9 +575,8 @@ class NudeNetDetector:
                     y2_padded = min(height, y2 + self.padding)
                     
                     # Pixelate the detected region (using padded coordinates)
-                    adaptive_pixel_size = max(5, min(self.pixel_size, int(score * 20)))
-                    img = self.pixelate_region(img, x1_padded, y1_padded, x2_padded, y2_padded, adaptive_pixel_size)
-                    print(f"  Pixelated detection #{i+1} ({class_name}) with pixel size {adaptive_pixel_size} and {self.padding}px padding")
+                    img = self.pixelate_region(img, x1_padded, y1_padded, x2_padded, y2_padded, self.pixel_size)
+                    print(f"  Pixelated detection #{i+1} ({class_name}) with pixel size {self.pixel_size} and {self.padding}px padding")
                     
                     # Draw rectangle border and labels if requested
                     if draw_rectangles:
