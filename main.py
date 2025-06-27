@@ -1,387 +1,547 @@
 #!/usr/bin/env python3
 """
-Image Processing Script with Record Keeping
-This script demonstrates how to use the ImageBlurrer class with database tracking.
-Can be used as a standalone script with command-line arguments.
+Enhanced Image Processing Script with NudeNet and YOLO Detection
+This script combines NudeNet detection with YOLO detection for comprehensive content filtering.
+Includes WordPress sizing and folder structure support.
 """
 
 import os
 import sys
 import argparse
+import json
+import requests
 from pathlib import Path
-import shutil
+import cv2
+from PIL import Image
+from nudenet_detector import NudeNetDetector
+from ultralytics import YOLO
 
-# Add the src directory to the Python path
-sys.path.append(str(Path(__file__).parent.parent))
+# WordPress image sizes configuration
+WORDPRESS_SIZES = {
+    'blog-tn': (170, 145, False),      # 510x315, cropped
+    'category-thumb': (250, 212, True),  # 250x212, cropped
+    'swiper-desktop': (590, 504, False)  # 590x504, not cropped
+}
 
-from src.processors import (
-    ImageProcessor,
-    SlidingWindowImageProcessor,
-    CustomJSONImageProcessor,
-    SlidingWindowCustomJSONImageProcessor,
-    SlidingWindowWordPressImageProcessor
-)
-from src.processors.utils import list_available_parts, validate_paths
-
-
-def restore_backup_files(backup_dir, dry_run=True):
+def download_image(url, download_dir="downloads"):
     """
-    Restore backup files from the backup directory to their original locations.
+    Download an image from URL to local directory.
     
     Args:
-        backup_dir (str): Path to the backup directory
-        dry_run (bool): If True, only show what would be restored without actually restoring
-    
-    Returns:
-        dict: Summary of restore operation
-    """
-    if not os.path.exists(backup_dir):
-        return {"error": f"Backup directory not found: {backup_dir}"}
-    
-    # Find all backup files
-    backup_files = []
-    for root, dirs, files in os.walk(backup_dir):
-        for file in files:
-            if file.endswith('.backup'):
-                backup_files.append(Path(root) / file)
-    
-    if not backup_files:
-        return {"error": "No backup files found"}
-    
-    restored_count = 0
-    skipped_count = 0
-    error_count = 0
-    
-    for backup_file in backup_files:
-        # Determine target path by removing .backup extension and backup directory prefix
-        relative_path = backup_file.relative_to(backup_dir)
-        target_path = Path('wp-content/uploads') / relative_path.with_suffix('')
+        url (str): Image URL to download
+        download_dir (str): Directory to save downloaded images
         
-        if dry_run:
-            # Just show what would be restored
-            pass
+    Returns:
+        str: Path to downloaded image file, or None if failed
+    """
+    try:
+        # Create download directory if it doesn't exist
+        os.makedirs(download_dir, exist_ok=True)
+        
+        # Extract filename from URL
+        filename = url.split('/')[-1]
+        if not filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+            filename += '.jpg'  # Default extension
+        
+        filepath = os.path.join(download_dir, filename)
+        
+        # Download the image
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        with open(filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print(f"Downloaded: {filename}")
+        return filepath
+        
+    except Exception as e:
+        print(f"Error downloading {url}: {e}")
+        return None
+
+def resize_image(image, target_size, crop=False):
+    """
+    Resize image to target size with optional cropping.
+    
+    Args:
+        image (PIL.Image): Input image
+        target_size (tuple): Target (width, height)
+        crop (bool): Whether to crop to exact size
+        
+    Returns:
+        PIL.Image: Resized image
+    """
+    target_width, target_height = target_size
+    
+    if crop:
+        # Crop to exact size
+        image.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+        # Center crop
+        left = (image.width - target_width) // 2
+        top = (image.height - target_height) // 2
+        right = left + target_width
+        bottom = top + target_height
+        return image.crop((left, top, right, bottom))
+    else:
+        # Resize maintaining aspect ratio
+        image.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+        return image
+
+def create_wordpress_sizes(original_image_path, processed_image_path, base_filename, image_type=None):
+    """
+    Create WordPress-sized images from the processed image based on image type.
+    
+    Args:
+        original_image_path (str): Path to original image
+        processed_image_path (str): Path to processed image
+        base_filename (str): Base filename without extension
+        image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
+        
+    Returns:
+        List of created file paths
+    """
+    created_files = []
+    
+    # Determine which sizes to create based on image type
+    if image_type == 'review_full_image':
+        # Only create swiper-desktop size (590x504)
+        sizes_to_create = ['swiper-desktop']
+    elif image_type == 'screenshot_full_url':
+        # Only create blog-tn and category-thumb sizes (170x145, 250x212)
+        sizes_to_create = ['blog-tn', 'category-thumb']
+    else:
+        # Default: create all sizes
+        sizes_to_create = list(WORDPRESS_SIZES.keys())
+    
+    # Detect original image format
+    original_format = 'JPEG'  # Default
+    if original_image_path.lower().endswith('.png'):
+        original_format = 'PNG'
+    elif original_image_path.lower().endswith(('.jpg', '.jpeg')):
+        original_format = 'JPEG'
+    
+    # Determine file extension and save parameters
+    if original_format.upper() == 'PNG':
+        file_extension = '.png'
+        save_format = 'PNG'
+        save_kwargs = {}
+    else:
+        file_extension = '.jpg'
+        save_format = 'JPEG'
+        save_kwargs = {'quality': 85}
+    
+    # Load the processed image
+    processed_image = Image.open(processed_image_path)
+    
+    for size_name in sizes_to_create:
+        width, height, crop = WORDPRESS_SIZES[size_name]
+        
+        # Create resized image
+        resized_image = resize_image(processed_image, (width, height), crop)
+        
+        # Generate filename with correct extension
+        if size_name == 'blog-tn':
+            filename = f"{base_filename}-170x145{file_extension}"
+        elif size_name == 'category-thumb':
+            filename = f"{base_filename}-250x212{file_extension}"
+        elif size_name == 'swiper-desktop':
+            filename = f"{base_filename}-590x504{file_extension}"
         else:
-            # Actually restore the file
+            filename = f"{base_filename}-{width}x{height}{file_extension}"
+        
+        # Determine output directory based on image type
+        if image_type == 'review_full_image':
+            # Save in wp-content/uploads/screenshots
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+        else:
+            # Save in wp-content/uploads
+            wp_upload_dir = os.path.join('wp-content', 'uploads')
+        
+        # Create output directory
+        os.makedirs(wp_upload_dir, exist_ok=True)
+        
+        # Save resized image with correct format
+        output_path = os.path.join(wp_upload_dir, filename)
+        resized_image.save(output_path, save_format, **save_kwargs)
+        created_files.append(output_path)
+        print(f"  Created {size_name} size: {filename}")
+    
+    return created_files
+
+def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None):
+    """
+    Process a single image with both NudeNet and YOLO detection.
+    
+    Args:
+        input_path (str): Path to input image
+        output_path (str): Path to output image
+        nudenet_detector (NudeNetDetector): NudeNet detector instance
+        yolo_model (YOLO): YOLO model instance
+        image_type (str): Type of image for WordPress sizing
+        
+    Returns:
+        dict: Processing results
+    """
+    try:
+        print(f"Processing: {input_path}")
+        
+        # Step 1: NudeNet detection and pixelation
+        print("  Running NudeNet detection...")
+        nudenet_result = nudenet_detector.process_image(
+            input_path=input_path,
+            output_path=output_path,
+            use_sliding_window=True,
+            draw_rectangles=False,
+            draw_labels=False
+        )
+        
+        if not nudenet_result['success']:
+            print(f"  NudeNet processing failed: {nudenet_result['message']}")
+            return nudenet_result
+        
+        print(f"  NudeNet detections: {nudenet_result['detection_count']}")
+        
+        # Step 2: YOLO detection and blurring
+        print("  Running YOLO detection...")
+        yolo_results = yolo_model(output_path)[0]
+        
+        if len(yolo_results.boxes) > 0:
+            print(f"  YOLO detections: {len(yolo_results.boxes)}")
+            
+            # Apply Gaussian blur to YOLO detections
+            img = cv2.imread(output_path)
+            for box in yolo_results.boxes.xyxy:
+                x1, y1, x2, y2 = map(int, box)
+                roi = img[y1:y2, x1:x2]
+                roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
+                img[y1:y2, x1:x2] = roi_blur
+            
+            # Save the final result
+            cv2.imwrite(output_path, img)
+            print(f"  Applied YOLO blurring to {len(yolo_results.boxes)} regions")
+        else:
+            print("  No YOLO detections found")
+        
+        # Step 3: Create WordPress sizes
+        print("  Creating WordPress sizes...")
+        base_filename = os.path.splitext(os.path.basename(output_path))[0]
+        created_files = create_wordpress_sizes(input_path, output_path, base_filename, image_type)
+        print(f"  Created {len(created_files)} WordPress-sized images")
+        
+        return {
+            'success': True,
+            'nudenet_detections': nudenet_result['detection_count'],
+            'yolo_detections': len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0,
+            'total_detections': nudenet_result['detection_count'] + (len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0),
+            'wordpress_files': created_files,
+            'message': f"Processed successfully - NudeNet: {nudenet_result['detection_count']}, YOLO: {len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0}"
+        }
+        
+    except Exception as e:
+        print(f"Error processing {input_path}: {e}")
+        return {
+            'success': False,
+            'message': f"Error: {str(e)}"
+        }
+
+def sliding_json(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False):
+    """
+    Process images from a JSON URL using sliding window detection.
+    
+    Args:
+        json_url (str): URL to JSON file containing image data
+        output_dir (str): Directory to save processed images
+        base_url (str): Base URL for converting relative paths to absolute URLs
+        force (bool): Force reprocessing even if output already exists
+        download_only (bool): Only download images, do not process them
+        
+    Returns:
+        dict: Processing summary
+    """
+    try:
+        print(f"=== Sliding JSON Processing ===")
+        print(f"JSON URL: {json_url}")
+        print(f"Output directory: {output_dir}")
+        print(f"Base URL: {base_url}")
+        print(f"Force reprocessing: {force}")
+        print(f"Download only: {download_only}")
+        print()
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Download JSON data
+        print("Downloading JSON data...")
+        response = requests.get(json_url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        print(f"JSON data loaded successfully")
+        
+        # Initialize detectors
+        if not download_only:
+            print("Initializing detectors...")
+            nudenet_detector = NudeNetDetector(
+                confidence_threshold=0.05,
+                pixel_size=15,
+                padding=5
+            )
+            
+            yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+            print("Detectors initialized successfully")
+        
+        # Process images
+        processed_count = 0
+        skipped_count = 0
+        error_count = 0
+        download_count = 0
+        
+        # Extract image URLs from JSON data
+        image_urls = []
+        
+        # Handle the specific JSON structure format
+        if isinstance(data, list):
+            # Direct list structure: [{"slug": "...", "screenshot_full_url": "...", "review_full_image": "..."}, ...]
+            for item in data:
+                if isinstance(item, dict):
+                    # Process screenshot_full_url
+                    if 'screenshot_full_url' in item:
+                        url = item['screenshot_full_url']
+                        if url:
+                            # Handle relative URLs with base_url
+                            if base_url and not url.startswith(('http://', 'https://')):
+                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                            image_urls.append({
+                                'url': url,
+                                'type': 'screenshot_full_url',
+                                'slug': item.get('slug', 'unknown')
+                            })
+                    
+                    # Process review_full_image
+                    if 'review_full_image' in item:
+                        url = item['review_full_image']
+                        if url:
+                            # Handle relative URLs with base_url
+                            if base_url and not url.startswith(('http://', 'https://')):
+                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                            image_urls.append({
+                                'url': url,
+                                'type': 'review_full_image',
+                                'slug': item.get('slug', 'unknown')
+                            })
+        
+        elif isinstance(data, dict):
+            # Check for the specific structure used in the previous implementation
+            if 'data' in data and isinstance(data['data'], list):
+                # Structure: {"data": [{"screenshot_full_url": "...", "review_full_image": "...", "slug": "..."}, ...]}
+                for item in data['data']:
+                    if isinstance(item, dict):
+                        # Process screenshot_full_url
+                        if 'screenshot_full_url' in item:
+                            url = item['screenshot_full_url']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'screenshot_full_url',
+                                    'slug': item.get('slug', 'unknown')
+                                })
+                        
+                        # Process review_full_image
+                        if 'review_full_image' in item:
+                            url = item['review_full_image']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'review_full_image',
+                                    'slug': item.get('slug', 'unknown')
+                                })
+            
+            elif 'images' in data and isinstance(data['images'], list):
+                # Structure: {"images": [{"screenshot_full_url": "...", "review_full_image": "...", "slug": "..."}, ...]}
+                for item in data['images']:
+                    if isinstance(item, dict):
+                        # Process screenshot_full_url
+                        if 'screenshot_full_url' in item:
+                            url = item['screenshot_full_url']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'screenshot_full_url',
+                                    'slug': item.get('slug', 'unknown')
+                                })
+                        
+                        # Process review_full_image
+                        if 'review_full_image' in item:
+                            url = item['review_full_image']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'review_full_image',
+                                    'slug': item.get('slug', 'unknown')
+                                })
+            
+            elif 'screenshot_full_url' in data:
+                # Single image structure: {"screenshot_full_url": "...", "review_full_image": "...", "slug": "..."}
+                url = data['screenshot_full_url']
+                if base_url and not url.startswith(('http://', 'https://')):
+                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                image_urls.append({
+                    'url': url,
+                    'type': 'screenshot_full_url',
+                    'slug': data.get('slug', 'unknown')
+                })
+            
+            elif 'review_full_image' in data:
+                # Single image structure: {"review_full_image": "...", "slug": "..."}
+                url = data['review_full_image']
+                if base_url and not url.startswith(('http://', 'https://')):
+                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                image_urls.append({
+                    'url': url,
+                    'type': 'review_full_image',
+                    'slug': data.get('slug', 'unknown')
+                })
+        
+        print(f"Found {len(image_urls)} image URLs to process")
+        
+        for i, image_data in enumerate(image_urls, 1):
             try:
-                # Create target directory if it doesn't exist
-                target_path.parent.mkdir(parents=True, exist_ok=True)
+                print(f"\n[{i}/{len(image_urls)}] Processing: {image_data['url']}")
                 
-                # Check if target already exists
-                if target_path.exists():
+                # Download image
+                downloaded_path = download_image(image_data['url'])
+                if not downloaded_path:
+                    error_count += 1
+                    continue
+                
+                download_count += 1
+                
+                if download_only:
+                    continue
+                
+                # Determine image type based on URL or JSON structure
+                image_type = image_data['type']
+                
+                print(f"  Detected image type: {image_type}")
+                
+                # Determine output path with WordPress structure
+                filename = os.path.basename(downloaded_path)
+                
+                if image_type == 'review_full_image':
+                    # Save in wp-content/uploads/screenshots
+                    wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+                    output_path = os.path.join(wp_upload_dir, filename)
+                    print(f" Screenshots Output directory: {wp_upload_dir}")
+                else:
+                    # Save in wp-content/uploads
+                    wp_upload_dir = os.path.join('wp-content', 'uploads')
+                    output_path = os.path.join(wp_upload_dir, filename)
+                
+                print(f"  Output directory: {wp_upload_dir}")
+                print(f"  Output path: {output_path}")
+                
+                # Create output directory structure
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                
+                # Also create the screenshots folder for review_full_image type
+                if image_type == 'review_full_image':
+                    screenshots_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    print(f"  Created screenshots directory: {screenshots_dir}")
+                
+                # Check if already processed
+                if os.path.exists(output_path) and not force:
+                    print(f"  Skipped (already exists): {output_path}")
                     skipped_count += 1
                     continue
                 
-                # Copy backup file to target location
-                shutil.copy2(backup_file, target_path)
-                restored_count += 1
+                # Process the image
+                result = process_single_image(
+                    downloaded_path, 
+                    output_path, 
+                    nudenet_detector, 
+                    yolo_model,
+                    image_type
+                )
+                
+                if result['success']:
+                    processed_count += 1
+                    print(f"  Success: {output_path}")
+                    print(f"    NudeNet detections: {result['nudenet_detections']}")
+                    print(f"    YOLO detections: {result['yolo_detections']}")
+                    print(f"    WordPress files: {len(result['wordpress_files'])}")
+                else:
+                    error_count += 1
+                    print(f"  Failed: {result['message']}")
                 
             except Exception as e:
                 error_count += 1
+                print(f"  Error processing {image_data['url']}: {e}")
                 continue
-    
-    if dry_run:
+        
+        # Summary
+        print(f"\n=== Processing Summary ===")
+        print(f"Total images: {len(image_urls)}")
+        print(f"Downloaded: {download_count}")
+        if not download_only:
+            print(f"Processed: {processed_count}")
+            print(f"Skipped: {skipped_count}")
+        print(f"Errors: {error_count}")
+        
         return {
-            "mode": "dry_run",
-            "total_files": len(backup_files),
-            "would_restore": len(backup_files)
+            'success': True,
+            'total_images': len(image_urls),
+            'downloaded': download_count,
+            'processed': processed_count if not download_only else 0,
+            'skipped': skipped_count if not download_only else 0,
+            'errors': error_count
         }
-    else:
+        
+    except Exception as e:
+        print(f"Error in sliding_json: {e}")
         return {
-            "mode": "restore",
-            "total_files": len(backup_files),
-            "restored": restored_count,
-            "skipped": skipped_count,
-            "errors": error_count
+            'success': False,
+            'message': f"Error: {str(e)}"
         }
-
 
 def main():
-    parser = argparse.ArgumentParser(description='WordPress Image Processing Tool')
-    parser.add_argument('command', choices=[
-        'process-single', 'process-batch', 'process-wordpress', 
-        'process-custom-json', 'sliding-json', 'process-single-slide', 'process-batch-slide',
-        'sliding-single', 'sliding-batch', 'sliding-wordpress',
-        'restore-backup'
-    ], help='Command to execute')
-    
-    # Positional arguments for legacy commands
-    parser.add_argument('input', nargs='?', help='Input file, directory, or JSON URL')
-    parser.add_argument('output', nargs='?', help='Output file or directory')
-    
-    # Common arguments
-    parser.add_argument('--input', '-i', help='Input file or directory (alternative to positional)')
-    parser.add_argument('--output', '-o', default='data/custom_processed', help='Output file or directory')
-    parser.add_argument('--window-size', type=int, default=512, help='Sliding window size')
-    parser.add_argument('--stride', type=int, default=256, help='Sliding window stride')
-    parser.add_argument('--overlap-threshold', type=float, default=0.3, help='Overlap threshold for merging detections')
-    parser.add_argument('--confidence-threshold', type=float, default=0.1, help='Minimum confidence for detections')
-    
-    # Detection method arguments
-    parser.add_argument('--nudenet', action='store_true', help='Enable NudeNet detection')
-    parser.add_argument('--yolo', action='store_true', help='Enable YOLO detection')
-    parser.add_argument('--nudenet-confidence', type=float, default=0.6, help='NudeNet confidence threshold')
-    parser.add_argument('--yolo-confidence', type=float, default=0.5, help='YOLO confidence threshold')
-    parser.add_argument('--yolo-model', help='Path to YOLO model file')
-    
-    # Blur method arguments
-    parser.add_argument('--blur-method', choices=['pixelate', 'blur'], default='pixelate', help='Blur method')
-    parser.add_argument('--pixel-size', type=int, default=10, help='Pixel size for pixelation')
-    
-    # WordPress specific arguments
-    parser.add_argument('--wordpress-dir', default='wp-content/uploads', help='WordPress uploads directory')
-    
-    # Custom JSON specific arguments
-    parser.add_argument('--json-url', help='URL to JSON data (alternative to positional input)')
+    """
+    Main function with command-line argument parsing.
+    """
+    parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
+    parser.add_argument('command', choices=['sliding-json'], help='Command to execute')
+    parser.add_argument('--json-url', required=True, help='URL to JSON file containing image data')
+    parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--base-url', help='Base URL for converting relative paths to absolute URLs')
-    parser.add_argument('--download-dir', default='downloads', help='Directory to download images')
-    parser.add_argument('--force', action='store_true', help='Force reprocessing even if already processed')
+    parser.add_argument('--force', action='store_true', help='Force reprocessing even if output already exists')
     parser.add_argument('--download-only', action='store_true', help='Only download images, do not process them')
-    
-    # Backup restore arguments
-    parser.add_argument('--backup-dir', default='wp-content/uploads/backup', help='Backup directory path')
-    parser.add_argument('--no-dry-run', action='store_true', help='Actually restore files (not dry run)')
     
     args = parser.parse_args()
     
-    # Handle positional arguments for legacy commands
-    if args.command in ['sliding-json', 'sliding-single', 'sliding-batch', 'sliding-wordpress']:
-        if args.input and not args.json_url:
-            args.json_url = args.input
-        if args.output:
-            args.output_dir = args.output
-    
-    if args.command == 'restore-backup':
-        result = restore_backup_files(args.backup_dir, dry_run=not args.no_dry_run)
-        
-        if "error" in result:
-            print(f"❌ {result['error']}")
-            return
-        
-        if result["mode"] == "dry_run":
-            print(f"📋 Dry run complete - would restore {result['would_restore']} files")
-        else:
-            print(f"✅ Restore complete:")
-            print(f"  Restored: {result['restored']} files")
-            print(f"  Skipped: {result['skipped']} files (already exist)")
-            print(f"  Errors: {result['errors']} files")
-        return
-    
-    # Initialize detection methods
-    nudenet_enabled = args.nudenet
-    yolo_enabled = args.yolo
-    
-    # If neither is specified, enable both by default
-    if not nudenet_enabled and not yolo_enabled:
-        nudenet_enabled = True
-        yolo_enabled = True
-    
     if args.command == 'sliding-json':
-        if not args.json_url:
-            print("Error: JSON URL is required for sliding-json command")
-            return
-        
-        processor = SlidingWindowCustomJSONImageProcessor(
+        result = sliding_json(
             json_url=args.json_url,
-            json_file=None,
+            output_dir=args.output_dir,
             base_url=args.base_url,
-            model_path=args.yolo_model or 'models/640m.onnx',
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            yolo_model_path=args.yolo_model
-        )
-        
-        output_dir = args.output or "data/custom_processed"
-        
-        processor.process_custom_json_images(
-            output_dir=output_dir,
-            pixel_size=args.pixel_size,
             force=args.force,
-            download_only=args.download_only,
-            use_yolo_detection=True,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model
+            download_only=args.download_only
         )
         
-    elif args.command == 'process-custom-json':
-        if not args.json_url:
-            print("Error: --json-url is required for process-custom-json command")
-            return
+        if not result['success']:
+            print(f"❌ {result['message']}")
+            return 1
         
-        processor = SlidingWindowCustomJSONImageProcessor(
-            json_url=args.json_url,
-            json_file=None,
-            base_url=args.base_url,
-            model_path=args.yolo_model or 'models/640m.onnx',
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            yolo_model_path=args.yolo_model
-        )
-        
-        output_dir = args.output or "data/custom_processed"
-        
-        processor.process_custom_json_images(
-            output_dir=output_dir,
-            pixel_size=args.pixel_size,
-            force=args.force,
-            download_only=args.download_only,
-            use_yolo_detection=True,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model
-        )
-        
-    elif args.command == 'process-single-slide' or args.command == 'sliding-single':
-        if not args.input or not args.output:
-            print("Error: --input and --output are required for process-single-slide/sliding-single command")
-            return
-        
-        processor = SlidingWindowImageProcessor(
-            model_path=args.yolo_model,
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
-        )
-        
-        processor.process_single_image(
-            input_path=args.input,
-            output_path=args.output,
-            pixel_size=args.pixel_size,
-            confidence_threshold=args.yolo_confidence,
-            force=True
-        )
-        
-    elif args.command == 'process-batch-slide' or args.command == 'sliding-batch':
-        if not args.input or not args.output:
-            print("Error: --input and --output are required for process-batch-slide/sliding-batch command")
-            return
-        
-        input_dir = args.input
-        output_dir = args.output
-        
-        if not os.path.exists(input_dir):
-            print(f"Error: Input directory does not exist: {input_dir}")
-            return
-        
-        processor = SlidingWindowImageProcessor(
-            model_path=args.yolo_model,
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
-        )
-        
-        processor.process_multiple_images(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            pixel_size=args.pixel_size,
-            confidence_threshold=args.yolo_confidence,
-            force=True
-        )
-        
-    elif args.command == 'process-wordpress' or args.command == 'sliding-wordpress':
-        processor = SlidingWindowWordPressImageProcessor(
-            wordpress_dir=args.wordpress_dir,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
-        )
-        
-        processor.process_wordpress_json_images(
-            output_dir=args.output,
-            pixel_size=args.pixel_size,
-            confidence_threshold=args.yolo_confidence,
-            force=True,
-            debug=False
-        )
-        
-    elif args.command == 'process-single':
-        if not args.input or not args.output:
-            print("Error: --input and --output are required for process-single command")
-            return
-        
-        processor = SlidingWindowImageProcessor(
-            model_path=args.yolo_model,
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
-        )
-        
-        processor.process_single_image(
-            input_path=args.input,
-            output_path=args.output,
-            pixel_size=args.pixel_size,
-            confidence_threshold=args.yolo_confidence,
-            force=True
-        )
-        
-    elif args.command == 'process-batch':
-        if not args.input or not args.output:
-            print("Error: --input and --output are required for process-batch command")
-            return
-        
-        input_dir = args.input
-        output_dir = args.output
-        
-        if not os.path.exists(input_dir):
-            print(f"Error: Input directory does not exist: {input_dir}")
-            return
-        
-        processor = SlidingWindowImageProcessor(
-            model_path=args.yolo_model,
-            database_path=None,
-            window_size=args.window_size,
-            stride=args.stride,
-            overlap_threshold=args.overlap_threshold,
-            nudenet_enabled=nudenet_enabled,
-            yolo_enabled=yolo_enabled,
-            nudenet_confidence_threshold=args.nudenet_confidence,
-            yolo_confidence_threshold=args.yolo_confidence,
-            yolo_model_path=args.yolo_model,
-            blur_method=args.blur_method,
-            pixel_size=args.pixel_size
-        )
-        
-        processor.process_multiple_images(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            pixel_size=args.pixel_size,
-            confidence_threshold=args.yolo_confidence,
-            force=True
-        )
-
+        print("✅ Processing completed successfully!")
+        return 0
 
 if __name__ == "__main__":
-    main() 
+    exit(main()) 

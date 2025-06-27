@@ -1,10 +1,10 @@
 import cv2
 from ultralytics import YOLO
 
-model = YOLO("runs/detect/train13/weights/best.pt")
-results = model("../data/Teen-Porn-Video-55.jpg")[0]
+model = YOLO("runs/detect/train15/weights/best.pt")
+results = model("../data/brazzers.jpg")[0]
 
-img = cv2.imread("../data/Teen-Porn-Video-55.jpg")
+img = cv2.imread("../data/brazzers.jpg")
 for box in results.boxes.xyxy:
     x1, y1, x2, y2 = map(int, box)
     roi = img[y1:y2, x1:x2]

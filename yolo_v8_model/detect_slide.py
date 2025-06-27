@@ -23,7 +23,7 @@ class TwoStageSlidingWindowDetector:
     def __init__(self, nudenet_model_path='models/classifier_model.onnx', yolo_model_path='models/80_epoch.pt',
                  window_size=640, stride=320, overlap_threshold=0.3,
                  nudenet_enabled=True, yolo_enabled=True,
-                 nudenet_confidence_threshold=0.6, yolo_confidence_threshold=0.5,
+                 nudenet_confidence_threshold=0.5, yolo_confidence_threshold=0.5,
                  blur_method='pixelate', pixel_size=10):
         """
         Initialize the two-stage sliding window detector.
@@ -645,7 +645,7 @@ class TwoStageSlidingWindowDetector:
                         classes = result.boxes.cls.cpu().numpy()
                         
                         for j, box in enumerate(boxes):
-                            x1, y1, x2, y2 = map(int, box)
+    x1, y1, x2, y2 = map(int, box)
                             confidence = float(confs[j])
                             cls = int(classes[j])
                             
@@ -867,12 +867,12 @@ if __name__ == "__main__":
             yolo_model_path="runs/detect/train15/weights/best.pt",
             window_size=160,
             stride=120,
-            overlap_threshold=0.5
+            overlap_threshold=0.7
         )
         
         result = detector.process_image(
-            input_path="../data/apetube.jpg",
-            output_path="blurred_comprehensive.jpg"
+            input_path="../data/brazzers.jpg",
+            output_path="./blurred_comprehensive.jpg"
         )
         
         print(f"Default comprehensive processing complete! Output saved to: {result}")

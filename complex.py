@@ -1,11 +1,11 @@
 from src.blurrer import SlidingWindowBlurrer
 
-inputPath = "data/Analvids.jpg"
+inputPath = "data/brazzers.jpg"
 outputPath = "output_sliding_window.jpg"
 
 # Initialize sliding window blurrer for better detection
 blurrer = SlidingWindowBlurrer(
-    model_path='models/male.onnx', 
+    model_path='models/640m.onnx', 
     parts=[
         'BUTTOCKS_EXPOSED',
         'BUTTOCKS_COVERED',
