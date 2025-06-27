@@ -336,7 +336,7 @@ class NudeNetDetector:
             print(f"Running detection on {len(preprocessed_images)} preprocessed versions...")
             
             for i, (preprocess_type, img, img_size) in enumerate(preprocessed_images):
-                print(f"  Processing {preprocess_type} version (size: {img_size})...")
+                # print(f"  Processing {preprocess_type} version (size: {img_size})...")
                 
                 # Save temporary image for NudeNet
                 temp_path = f"temp_{preprocess_type}.jpg"
@@ -361,7 +361,7 @@ class NudeNetDetector:
                             filtered_detections.append(detection)
                     
                     all_detections.extend(filtered_detections)
-                    print(f"    Found {len(filtered_detections)} detections")
+                    # print(f"    Found {len(filtered_detections)} detections")
                     
                 except Exception as e:
                     print(f"    Error detecting on {preprocess_type}: {e}")
