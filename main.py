@@ -75,18 +75,62 @@ def resize_image(image, target_size, crop=False):
     target_width, target_height = target_size
     
     if crop:
-        # Crop to exact size
-        image.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
-        # Center crop
-        left = (image.width - target_width) // 2
-        top = (image.height - target_height) // 2
+        # For cropping, first resize to cover the target area, then crop
+        # Calculate aspect ratios
+        target_ratio = target_width / target_height
+        image_ratio = image.width / image.height
+        
+        if image_ratio > target_ratio:
+            # Image is wider than target, resize by height first
+            new_height = target_height
+            new_width = int(image.width * (target_height / image.height))
+        else:
+            # Image is taller than target, resize by width first
+            new_width = target_width
+            new_height = int(image.height * (target_width / image.width))
+        
+        # Resize image to cover target area
+        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Center crop to exact target size
+        left = (new_width - target_width) // 2
+        top = (new_height - target_height) // 2
         right = left + target_width
         bottom = top + target_height
-        return image.crop((left, top, right, bottom))
+        
+        return resized.crop((left, top, right, bottom))
     else:
-        # Resize maintaining aspect ratio
-        image.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
-        return image
+        # For non-cropping, resize maintaining aspect ratio
+        # Calculate new size that fits within target dimensions
+        image_ratio = image.width / image.height
+        target_ratio = target_width / target_height
+        
+        if image_ratio > target_ratio:
+            # Image is wider, fit by width
+            new_width = target_width
+            new_height = int(target_width / image_ratio)
+        else:
+            # Image is taller, fit by height
+            new_height = target_height
+            new_width = int(target_height * image_ratio)
+        
+        # Resize image
+        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Create new image with target background (white or transparent)
+        if resized.mode in ('RGBA', 'LA'):
+            # For images with transparency, use transparent background
+            new_image = Image.new('RGBA', (target_width, target_height), (0, 0, 0, 0))
+        else:
+            # For opaque images, use white background
+            new_image = Image.new('RGB', (target_width, target_height), (255, 255, 255))
+        
+        # Paste resized image in center
+        paste_x = (target_width - new_width) // 2
+        paste_y = (target_height - new_height) // 2
+        new_image.paste(resized, (paste_x, paste_y))
+        
+        return new_image
 
 def create_wordpress_sizes(original_image_path, processed_image_path, base_filename, image_type=None):
     """
