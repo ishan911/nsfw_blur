@@ -333,7 +333,7 @@ class NudeNetDetector:
             
             all_detections = []
             
-            print(f"Running detection on {len(preprocessed_images)} preprocessed versions...")
+            # print(f"Running detection on {len(preprocessed_images)} preprocessed versions...")
             
             for i, (preprocess_type, img, img_size) in enumerate(preprocessed_images):
                 # print(f"  Processing {preprocess_type} version (size: {img_size})...")
@@ -374,7 +374,7 @@ class NudeNetDetector:
             # Remove duplicate detections
             unique_detections = self.remove_duplicate_detections(all_detections)
             
-            print(f"Total unique detections after deduplication: {len(unique_detections)}")
+            # print(f"Total unique detections after deduplication: {len(unique_detections)}")
             
             return unique_detections
             
@@ -487,8 +487,8 @@ class NudeNetDetector:
             # Clean up temporary file
             os.remove(temp_window_path)
             
-            if len(filtered) > 0:
-                print(f"  Window ({x},{y}): {len(filtered)} detections")
+            # if len(filtered) > 0:
+            #     print(f"  Window ({x},{y}): {len(filtered)} detections")
         
         print(f"\nSliding window processing complete:")
         print(f"  Windows processed: {window_count}")
@@ -498,7 +498,7 @@ class NudeNetDetector:
         # Remove duplicate detections from overlapping windows
         if all_window_detections:
             unique_detections = self.remove_duplicate_detections(all_window_detections, iou_threshold=0.3)
-            print(f"  Unique detections after deduplication: {len(unique_detections)}")
+            # print(f"  Unique detections after deduplication: {len(unique_detections)}")
             return unique_detections
         else:
             print("  No detections found in any windows")
