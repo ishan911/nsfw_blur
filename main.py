@@ -19,12 +19,15 @@ from nudenet_detector import NudeNetDetector
 from ultralytics import YOLO
 import numpy as np
 
-# WordPress image sizes configuration
+# Configuration
 WORDPRESS_SIZES = {
     'blog-tn': (170, 145, False),      # 510x315, cropped
     'category-thumb': (250, 212, True),  # 250x212, cropped
     'swiper-desktop': (590, 504, False)  # 590x504, not cropped
 }
+
+# YOLO configuration - set to False to disable YOLO detection if there are compatibility issues
+ENABLE_YOLO_DETECTION = True
 
 class DatabaseTracker:
     """Simple database tracker for processed images."""
@@ -537,7 +540,7 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         print(f"Error pixelating region: {e}")
         return img
 
-def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False):
+def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False):
     """
     Process a single image with both NudeNet and YOLO detection.
     
@@ -548,6 +551,8 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         yolo_model (YOLO): YOLO model instance
         image_type (str): Type of image for WordPress sizing
         force (bool): Force reprocessing even if already processed
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
         
     Returns:
         dict: Processing results
@@ -578,8 +583,8 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
             input_path=input_path,
             output_path=output_path,
             use_sliding_window=True,
-            draw_rectangles=False,
-            draw_labels=False
+            draw_rectangles=draw_rectangles,
+            draw_labels=draw_labels
         )
         
         if not nudenet_result['success']:
@@ -590,30 +595,66 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         
         # Step 2: YOLO detection and blurring
         print("  Running YOLO detection...")
-        yolo_results = []
-        try:
-            yolo_results = yolo_model(output_path)[0]
-            yolo_detections = []
-            
-            if len(yolo_results.boxes) > 0:
-                print(f"  YOLO detections: {len(yolo_results.boxes)}")
+        yolo_detections = []
+        
+        if not ENABLE_YOLO_DETECTION:
+            print("    YOLO detection disabled in configuration")
+        else:
+            try:
+                # Run YOLO detection with better error handling
+                yolo_results = yolo_model(output_path, verbose=False)
                 
-                # Apply Gaussian blur to YOLO detections
-                img = cv2.imread(output_path)
-                for box in yolo_results.boxes.xyxy:
-                    x1, y1, x2, y2 = map(int, box)
-                    roi = img[y1:y2, x1:x2]
-                    roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
-                    img[y1:y2, x1:x2] = roi_blur
+                # Handle YOLO results properly with error checking
+                if isinstance(yolo_results, list) and len(yolo_results) > 0:
+                    result = yolo_results[0]  # Get first result
+                    if hasattr(result, 'boxes') and result.boxes is not None:
+                        boxes = result.boxes
+                        if len(boxes) > 0:
+                            print(f"    Found {len(boxes)} YOLO detections")
+                            
+                            # Convert boxes to detection format
+                            for box in boxes:
+                                try:
+                                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                                    confidence = box.conf[0].cpu().numpy()
+                                    class_id = int(box.cls[0].cpu().numpy())
+                                    
+                                    yolo_detections.append({
+                                        'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
+                                        'score': float(confidence),
+                                        'class': f'yolo_class_{class_id}'
+                                    })
+                                except Exception as box_error:
+                                    print(f"    Error processing YOLO box: {box_error}")
+                                    continue
+                            
+                            # Apply additional YOLO blurring if needed
+                            if yolo_detections:
+                                img = cv2.imread(output_path)
+                                for detection in yolo_detections:
+                                    try:
+                                        x1, y1, w, h = detection['box']
+                                        x2, y2 = x1 + w, y1 + h
+                                        roi = img[y1:y2, x1:x2]
+                                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
+                                        img[y1:y2, x1:x2] = roi_blur
+                                    except Exception as blur_error:
+                                        print(f"    Error applying blur to detection: {blur_error}")
+                                        continue
+                                
+                                cv2.imwrite(output_path, img)
+                                print(f"    Applied YOLO blurring to {len(yolo_detections)} regions")
+                        else:
+                            print("    No YOLO detections found")
+                    else:
+                        print("    No YOLO detections found")
+                else:
+                    print("    No YOLO detections found")
                 
-                # Save the final result
-                cv2.imwrite(output_path, img)
-                print(f"  Applied YOLO blurring to {len(yolo_results.boxes)} regions")
-            else:
-                print("  No YOLO detections found")
-        except Exception as e:
-            print(f"  Error in YOLO detection: {e}")
-            print("  No YOLO detections found")
+            except Exception as e:
+                print(f"    Error in YOLO detection: {e}")
+                print("    Skipping YOLO detection due to error")
+                yolo_detections = []
         
         # Step 3: Create WordPress versions
         print("  Creating WordPress versions...")
@@ -633,7 +674,7 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
             pixel_size=nudenet_detector.pixel_size,
             confidence_threshold=nudenet_detector.confidence_threshold,
             nudenet_detections=nudenet_result['detection_count'],
-            yolo_detections=len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0,
+            yolo_detections=len(yolo_detections),
             wordpress_files=created_files,
             image_type=image_type
         )
@@ -641,10 +682,10 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         return {
             'success': True,
             'nudenet_detections': nudenet_result['detection_count'],
-            'yolo_detections': len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0,
-            'total_detections': nudenet_result['detection_count'] + (len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0),
+            'yolo_detections': len(yolo_detections),
+            'total_detections': nudenet_result['detection_count'] + len(yolo_detections),
             'wordpress_files': created_files,
-            'message': f"Processed successfully - NudeNet: {nudenet_result['detection_count']}, YOLO: {len(yolo_results.boxes) if len(yolo_results.boxes) > 0 else 0}"
+            'message': f"Processed successfully - NudeNet: {nudenet_result['detection_count']}, YOLO: {len(yolo_detections)}"
         }
         
     except Exception as e:
@@ -654,9 +695,9 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
             'message': f"Error: {str(e)}"
         }
 
-def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False):
+def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False):
     """
-    Process a single image with enhanced detection methods from detect_all_parts.py.
+    Process a single image with enhanced detection methods.
     
     Args:
         input_path (str): Path to input image
@@ -665,6 +706,8 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         yolo_model: YOLO model instance
         image_type (str): Type of image for WordPress sizing
         force (bool): Force reprocessing
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
         
     Returns:
         dict: Processing result
@@ -680,517 +723,129 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                 'wordpress_files': []
             }
         
-        # Load image
-        img = cv2.imread(input_path)
-        if img is None:
-            return {
-                'success': False,
-                'message': f'Could not load image: {input_path}',
-                'nudenet_detections': 0,
-                'yolo_detections': 0,
-                'wordpress_files': []
-            }
+        # Use the enhanced NudeNetDetector approach
+        print(f"  Running enhanced detection with full image first...")
+        nudenet_result = nudenet_detector.process_image(
+            input_path=input_path,
+            output_path=output_path,
+            use_sliding_window=True,  # This will use detect_with_full_image_first
+            draw_rectangles=draw_rectangles,
+            draw_labels=draw_labels
+        )
         
-        # Run enhanced NudeNet detection (using methods from detect_all_parts.py)
-        print(f"  Running enhanced NudeNet detection...")
-        nudenet_detections = run_enhanced_nudenet_detection(input_path, confidence_threshold=0.05)
-        print(f"    Found {len(nudenet_detections)} NudeNet detections")
+        if not nudenet_result['success']:
+            print(f"  Enhanced processing failed: {nudenet_result['message']}")
+            return nudenet_result
         
-        # Run YOLO detection
-        # print(f"  Running YOLO detection...")
-        # try:
-        #     yolo_results = yolo_model(input_path, verbose=False)
-        #     yolo_detections = []
-            
-        #     for result in yolo_results:
-        #         boxes = result.boxes
-        #         if boxes is not None:
-        #             for box in boxes:
-        #                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-        #                 confidence = box.conf[0].cpu().numpy()
-        #                 class_id = int(box.cls[0].cpu().numpy())
-                        
-        #                 yolo_detections.append({
-        #                     'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
-        #                     'score': float(confidence),
-        #                     'class': f'yolo_class_{class_id}'
-        #                 })
-            
-        #     print(f"    Found {len(yolo_detections)} YOLO detections")
-        # except Exception as e:
-        #     print(f"    Error in YOLO detection: {e}")
-        #     yolo_detections = []
+        print(f"  Enhanced detections: {nudenet_result['detection_count']}")
         
-        # Combine detections
+        # Run YOLO detection on the processed image
+        print(f"  Running YOLO detection...")
         yolo_detections = []
-        all_detections = nudenet_detections + yolo_detections
         
-        if all_detections:
-            # Apply pixelation to detected regions
-            print(f"  Applying pixelation to {len(all_detections)} detections...")
-            img = apply_pixelation_to_detections(img, all_detections, pixel_size=15, padding=5)
-        
-        # Save the processed image
-        cv2.imwrite(output_path, img)
+        if not ENABLE_YOLO_DETECTION:
+            print("    YOLO detection disabled in configuration")
+        else:
+            try:
+                # Run YOLO detection with better error handling
+                yolo_results = yolo_model(output_path, verbose=False)
+                
+                # Handle YOLO results properly with error checking
+                if isinstance(yolo_results, list) and len(yolo_results) > 0:
+                    result = yolo_results[0]  # Get first result
+                    if hasattr(result, 'boxes') and result.boxes is not None:
+                        boxes = result.boxes
+                        if len(boxes) > 0:
+                            print(f"    Found {len(boxes)} YOLO detections")
+                            
+                            # Convert boxes to detection format
+                            for box in boxes:
+                                try:
+                                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                                    confidence = box.conf[0].cpu().numpy()
+                                    class_id = int(box.cls[0].cpu().numpy())
+                                    
+                                    yolo_detections.append({
+                                        'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
+                                        'score': float(confidence),
+                                        'class': f'yolo_class_{class_id}'
+                                    })
+                                except Exception as box_error:
+                                    print(f"    Error processing YOLO box: {box_error}")
+                                    continue
+                            
+                            # Apply additional YOLO blurring if needed
+                            if yolo_detections:
+                                img = cv2.imread(output_path)
+                                for detection in yolo_detections:
+                                    try:
+                                        x1, y1, w, h = detection['box']
+                                        x2, y2 = x1 + w, y1 + h
+                                        roi = img[y1:y2, x1:x2]
+                                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
+                                        img[y1:y2, x1:x2] = roi_blur
+                                    except Exception as blur_error:
+                                        print(f"    Error applying blur to detection: {blur_error}")
+                                        continue
+                                
+                                cv2.imwrite(output_path, img)
+                                print(f"    Applied YOLO blurring to {len(yolo_detections)} regions")
+                        else:
+                            print("    No YOLO detections found")
+                    else:
+                        print("    No YOLO detections found")
+                else:
+                    print("    No YOLO detections found")
+                
+            except Exception as e:
+                print(f"    Error in YOLO detection: {e}")
+                print("    Skipping YOLO detection due to error")
+                yolo_detections = []
         
         # Create WordPress versions if image_type is specified
         wordpress_files = []
         if image_type and image_type != 'category_thumb':
             base_filename = os.path.splitext(os.path.basename(output_path))[0]
-            wordpress_files = create_wordpress_versions(input_path, output_path, base_filename, image_type)
+            wordpress_files = create_wordpress_versions(
+                input_path, 
+                output_path, 
+                base_filename, 
+                image_type
+            )
+            print(f"  Created {len(wordpress_files)} WordPress-sized images")
         
         # Record in database
-        if db_tracker:
-            file_hash = calculate_file_hash(output_path)
-            db_tracker.record_processed_image(
-                original_path=input_path,
-                processed_path=output_path,
-                file_hash=file_hash,
-                nudenet_detections=len(nudenet_detections),
-                yolo_detections=len(yolo_detections),
-                image_type=image_type
-            )
+        db_tracker.record_processed_image(
+            input_path=input_path,
+            output_path=output_path,
+            pixel_size=nudenet_detector.pixel_size,
+            confidence_threshold=nudenet_detector.confidence_threshold,
+            nudenet_detections=nudenet_result['detection_count'],
+            yolo_detections=len(yolo_detections),
+            wordpress_files=wordpress_files,
+            image_type=image_type
+        )
         
         return {
             'success': True,
-            'message': 'Processed successfully',
-            'nudenet_detections': len(nudenet_detections),
+            'nudenet_detections': nudenet_result['detection_count'],
             'yolo_detections': len(yolo_detections),
-            'wordpress_files': wordpress_files
+            'total_detections': nudenet_result['detection_count'] + len(yolo_detections),
+            'wordpress_files': wordpress_files,
+            'message': f"Enhanced processing completed - NudeNet: {nudenet_result['detection_count']}, YOLO: {len(yolo_detections)}"
         }
         
     except Exception as e:
+        print(f"Error in enhanced processing: {e}")
         return {
             'success': False,
-            'message': f'Error: {str(e)}',
+            'message': f"Error: {str(e)}",
             'nudenet_detections': 0,
             'yolo_detections': 0,
             'wordpress_files': []
         }
 
-def run_enhanced_nudenet_detection(image_path, confidence_threshold=0.05):
-    """
-    Run enhanced NudeNet detection using methods from detect_all_parts.py.
-    
-    Args:
-        image_path (str): Path to input image
-        confidence_threshold (float): Minimum confidence for detections
-        
-    Returns:
-        List of detection dictionaries
-    """
-    try:
-        # Import NudeDetector inside function to avoid circular imports
-        try:
-            from nudenet import NudeDetector
-        except ImportError as e:
-            print(f"Error importing NudeDetector: {e}")
-            print("Falling back to basic detection...")
-            return run_basic_nudenet_detection(image_path, confidence_threshold)
-        
-        # Initialize NudeNet detector
-        detector = NudeDetector()
-        
-        # Allowed labels for filtering (same as in nudenet_detector.py)
-        allowed_labels = set([
-            "BUTTOCKS_EXPOSED",
-            "BUTTOCKS_COVERED",
-            "FEMALE_BREAST_EXPOSED",
-            "FEMALE_GENITALIA_EXPOSED",
-            "FEMALE_GENITALIA_COVERED",
-            "ANUS_COVERED",
-            "ANUS_EXPOSED",
-            "MALE_GENITALIA_EXPOSED",
-        ])
-        
-        # Get preprocessed images with multiple enhancement techniques
-        preprocessed_images = preprocess_image_for_enhanced_detection(image_path)
-        
-        all_detections = []
-        
-        print(f"    Running detection on {len(preprocessed_images)} enhanced versions...")
-        
-        for i, (preprocess_type, img, img_size) in enumerate(preprocessed_images):
-            # Save temporary image for NudeNet
-            temp_path = f"temp_enhanced_{preprocess_type}.jpg"
-            cv2.imwrite(temp_path, img)
-            
-            try:
-                # Run detection on this preprocessed version
-                detections = detector.detect(temp_path)
-                
-                # Filter by confidence threshold and allowed labels
-                filtered_detections = []
-                for detection in detections:
-                    if detection['score'] >= confidence_threshold and detection['class'] in allowed_labels:
-                        # Add preprocessing type info
-                        detection['preprocess_type'] = preprocess_type
-                        detection['image_size'] = img_size
-                        
-                        # Scale bounding boxes back to original image size if upscaled
-                        if 'upscaled' in preprocess_type:
-                            detection = scale_detection_to_original(detection, img_size, preprocessed_images[0][2])
-                        
-                        filtered_detections.append(detection)
-                
-                all_detections.extend(filtered_detections)
-                
-            except Exception as e:
-                print(f"      Error detecting on {preprocess_type}: {e}")
-            
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-        
-        # Remove duplicate detections
-        unique_detections = remove_duplicate_detections(all_detections)
-        
-        print(f"    Total unique detections: {len(unique_detections)}")
-        
-        return unique_detections
-        
-    except Exception as e:
-        print(f"Error in enhanced NudeNet detection: {str(e)}")
-        print("Falling back to basic detection...")
-        return run_basic_nudenet_detection(image_path, confidence_threshold)
-
-def run_basic_nudenet_detection(image_path, confidence_threshold=0.05):
-    """
-    Run basic NudeNet detection as fallback.
-    """
-    try:
-        from nudenet import NudeDetector
-        detector = NudeDetector()
-        detections = detector.detect(image_path)
-        
-        # Allowed labels for filtering (same as in nudenet_detector.py)
-        allowed_labels = set([
-            "BUTTOCKS_EXPOSED",
-            "BUTTOCKS_COVERED",
-            "FEMALE_BREAST_EXPOSED",
-            "FEMALE_GENITALIA_EXPOSED",
-            "FEMALE_GENITALIA_COVERED",
-            "ANUS_COVERED",
-            "ANUS_EXPOSED",
-            "MALE_GENITALIA_EXPOSED",
-        ])
-        
-        # Filter by confidence threshold and allowed labels
-        filtered_detections = []
-        for detection in detections:
-            if detection['score'] >= confidence_threshold and detection['class'] in allowed_labels:
-                filtered_detections.append(detection)
-        
-        return filtered_detections
-        
-    except Exception as e:
-        print(f"Error in basic NudeNet detection: {str(e)}")
-        return []
-
-def preprocess_image_for_enhanced_detection(image_path, enhancement_factor=1.5):
-    """
-    Preprocess image with multiple enhancement techniques for better detection.
-    
-    Args:
-        image_path (str): Path to input image
-        enhancement_factor (float): Brightness enhancement factor
-        
-    Returns:
-        List of preprocessed images with different scales and enhancements
-    """
-    try:
-        from PIL import Image, ImageEnhance
-        
-        # Load image with PIL for better enhancement control
-        pil_image = Image.open(image_path)
-        original_size = pil_image.size
-        
-        preprocessed_images = []
-        
-        # Original image
-        preprocessed_images.append(('original', cv2.imread(image_path), original_size))
-        
-        # Upscaled versions for small part detection
-        scale_factors = [1.5, 2.0, 2.5, 3.0]
-        
-        for scale in scale_factors:
-            # Calculate new size
-            new_width = int(original_size[0] * scale)
-            new_height = int(original_size[1] * scale)
-            new_size = (new_width, new_height)
-            
-            # Upscale image
-            upscaled = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-            upscaled_cv = cv2.cvtColor(np.array(upscaled), cv2.COLOR_RGB2BGR)
-            preprocessed_images.append((f'upscaled_{scale}x', upscaled_cv, new_size))
-            
-            # Upscaled + enhanced versions
-            enhancer = ImageEnhance.Brightness(upscaled)
-            brightened = enhancer.enhance(enhancement_factor)
-            enhancer = ImageEnhance.Contrast(brightened)
-            enhanced = enhancer.enhance(enhancement_factor)
-            enhanced_cv = cv2.cvtColor(np.array(enhanced), cv2.COLOR_RGB2BGR)
-            preprocessed_images.append((f'upscaled_{scale}x_enhanced', enhanced_cv, new_size))
-        
-        # Enhanced versions of original
-        enhancer = ImageEnhance.Brightness(pil_image)
-        brightened = enhancer.enhance(enhancement_factor)
-        brightened_cv = cv2.cvtColor(np.array(brightened), cv2.COLOR_RGB2BGR)
-        preprocessed_images.append(('brightened', brightened_cv, original_size))
-        
-        enhancer = ImageEnhance.Contrast(pil_image)
-        contrasted = enhancer.enhance(enhancement_factor)
-        contrasted_cv = cv2.cvtColor(np.array(contrasted), cv2.COLOR_RGB2BGR)
-        preprocessed_images.append(('contrasted', contrasted_cv, original_size))
-        
-        # Combined brightness and contrast
-        enhancer = ImageEnhance.Brightness(pil_image)
-        brightened = enhancer.enhance(enhancement_factor)
-        enhancer = ImageEnhance.Contrast(brightened)
-        combined = enhancer.enhance(enhancement_factor)
-        combined_cv = cv2.cvtColor(np.array(combined), cv2.COLOR_RGB2BGR)
-        preprocessed_images.append(('combined', combined_cv, original_size))
-        
-        # Gamma correction
-        gamma = 0.7
-        pil_array = np.array(pil_image)
-        gamma_corrected = np.power(pil_array / 255.0, gamma) * 255.0
-        gamma_corrected = gamma_corrected.astype(np.uint8)
-        gamma_cv = cv2.cvtColor(gamma_corrected, cv2.COLOR_RGB2BGR)
-        preprocessed_images.append(('gamma_corrected', gamma_cv, original_size))
-        
-        # Histogram equalization
-        img_cv = cv2.imread(image_path)
-        lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        l = clahe.apply(l)
-        lab = cv2.merge((l,a,b))
-        hist_eq = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        preprocessed_images.append(('histogram_equalized', hist_eq, original_size))
-        
-        # Grayscale enhancement
-        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-        clahe_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        enhanced_gray = clahe_gray.apply(gray)
-        enhanced_gray_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
-        preprocessed_images.append(('grayscale_enhanced', enhanced_gray_bgr, original_size))
-        
-        # Grayscale with contrast enhancement
-        enhanced_gray_contrast = cv2.convertScaleAbs(enhanced_gray, alpha=1.3, beta=10)
-        enhanced_gray_contrast_bgr = cv2.cvtColor(enhanced_gray_contrast, cv2.COLOR_GRAY2BGR)
-        preprocessed_images.append(('grayscale_contrast_enhanced', enhanced_gray_contrast_bgr, original_size))
-        
-        # Grayscale with brightness enhancement
-        enhanced_gray_bright = cv2.convertScaleAbs(enhanced_gray, alpha=1.0, beta=30)
-        enhanced_gray_bright_bgr = cv2.cvtColor(enhanced_gray_bright, cv2.COLOR_GRAY2BGR)
-        preprocessed_images.append(('grayscale_brightness_enhanced', enhanced_gray_bright_bgr, original_size))
-        
-        return preprocessed_images
-        
-    except Exception as e:
-        print(f"Error in image preprocessing: {str(e)}")
-        return [('original', cv2.imread(image_path), (0, 0))]
-
-def scale_detection_to_original(detection, current_size, original_size):
-    """
-    Scale detection bounding box from upscaled image back to original image size.
-    """
-    try:
-        current_width, current_height = current_size
-        original_width, original_height = original_size
-        
-        # Calculate scale factors
-        scale_x = original_width / current_width
-        scale_y = original_height / current_height
-        
-        # Scale the bounding box
-        x, y, w, h = detection['box']
-        scaled_x = x * scale_x
-        scaled_y = y * scale_y
-        scaled_w = w * scale_x
-        scaled_h = h * scale_y
-        
-        # Create new detection with scaled box
-        scaled_detection = detection.copy()
-        scaled_detection['box'] = [scaled_x, scaled_y, scaled_w, scaled_h]
-        
-        return scaled_detection
-        
-    except Exception as e:
-        print(f"Error scaling detection: {e}")
-        return detection
-
-def remove_duplicate_detections(detections, iou_threshold=0.5):
-    """
-    Remove duplicate detections based on IoU (Intersection over Union).
-    """
-    if not detections:
-        return []
-    
-    # Sort by confidence (highest first)
-    sorted_detections = sorted(detections, key=lambda x: x['score'], reverse=True)
-    
-    unique_detections = []
-    
-    for detection in sorted_detections:
-        is_duplicate = False
-        
-        for unique_detection in unique_detections:
-            # Check if same class
-            if detection['class'] == unique_detection['class']:
-                # Calculate IoU
-                iou = calculate_iou(detection['box'], unique_detection['box'])
-                if iou > iou_threshold:
-                    is_duplicate = True
-                    break
-        
-        if not is_duplicate:
-            unique_detections.append(detection)
-    
-    return unique_detections
-
-def calculate_iou(box1, box2):
-    """
-    Calculate Intersection over Union between two bounding boxes.
-    """
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-    
-    # Convert to [x1, y1, x2, y2] format
-    box1_x1, box1_y1, box1_x2, box1_y2 = x1, y1, x1 + w1, y1 + h1
-    box2_x1, box2_y1, box2_x2, box2_y2 = x2, y2, x2 + w2, y2 + h2
-    
-    # Calculate intersection
-    x_left = max(box1_x1, box2_x1)
-    y_top = max(box1_y1, box2_y1)
-    x_right = min(box1_x2, box2_x2)
-    y_bottom = min(box1_y2, box2_y2)
-    
-    if x_right < x_left or y_bottom < y_top:
-        return 0.0
-    
-    intersection_area = (x_right - x_left) * (y_bottom - y_top)
-    
-    # Calculate union
-    box1_area = w1 * h1
-    box2_area = w2 * h2
-    union_area = box1_area + box2_area - intersection_area
-    
-    return intersection_area / union_area if union_area > 0 else 0.0
-
-def apply_pixelation_to_detections(img, detections, pixel_size=15, padding=5):
-    """
-    Apply pixelation to detected regions in the image.
-    """
-    try:
-        height, width = img.shape[:2]
-        
-        # Sort detections by confidence (highest first)
-        sorted_detections = sorted(detections, key=lambda x: x['score'], reverse=True)
-        
-        for detection in sorted_detections:
-            try:
-                box = detection['box']
-                score = detection['score']
-                class_name = detection['class']
-                
-                # Validate bounding box coordinates
-                if len(box) != 4:
-                    continue
-                
-                x, y, w, h = box
-                x, y, w, h = int(x), int(y), int(w), int(h)
-                
-                # Check if coordinates are within image bounds
-                if x < 0 or y < 0 or w <= 0 or h <= 0:
-                    continue
-                
-                # Ensure rectangle doesn't go outside image bounds
-                x1, y1 = max(0, x), max(0, y)
-                x2, y2 = min(width, x + w), min(height, y + h)
-                
-                # Skip if rectangle is too small or invalid
-                if x2 <= x1 or y2 <= y1:
-                    continue
-                
-                # Add padding to the detected rectangle
-                x1_padded = max(0, x1 - padding)
-                y1_padded = max(0, y1 - padding)
-                x2_padded = min(width, x2 + padding)
-                y2_padded = min(height, y2 + padding)
-                
-                # Pixelate the detected region
-                img = pixelate_region(img, x1_padded, y1_padded, x2_padded, y2_padded, pixel_size)
-                
-            except Exception as e:
-                print(f"Error processing detection: {e}")
-                continue
-        
-        return img
-        
-    except Exception as e:
-        print(f"Error applying pixelation: {e}")
-        return img
-
-def pixelate_region(img, x1, y1, x2, y2, pixel_size=15):
-    """
-    Pixelate a region of an image.
-    """
-    try:
-        # Extract the region to pixelate
-        region = img[y1:y2, x1:x2]
-        
-        if region.size == 0:
-            return img
-        
-        # Get dimensions of the region
-        h, w = region.shape[:2]
-        
-        # Calculate new dimensions for pixelation
-        new_h = h // pixel_size
-        new_w = w // pixel_size
-        
-        if new_h == 0 or new_w == 0:
-            # If region is too small, use a smaller pixel size
-            pixel_size = min(h, w) // 2
-            if pixel_size < 2:
-                pixel_size = 2
-            new_h = h // pixel_size
-            new_w = w // pixel_size
-        
-        # Resize down to create pixelation effect
-        if new_h > 0 and new_w > 0:
-            # Use INTER_AREA for downsampling (better for pixelation)
-            pixelated = cv2.resize(region, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            # Resize back up to original size
-            pixelated = cv2.resize(pixelated, (w, h), interpolation=cv2.INTER_NEAREST)
-        else:
-            # Fallback for very small regions
-            pixelated = region
-        
-        # Replace the region in the original image
-        img[y1:y2, x1:x2] = pixelated
-        
-        return img
-        
-    except Exception as e:
-        print(f"Error pixelating region: {e}")
-        return img
-
-def calculate_file_hash(file_path):
-    """
-    Calculate MD5 hash of a file.
-    """
-    try:
-        with open(file_path, 'rb') as f:
-            return hashlib.md5(f.read()).hexdigest()
-    except Exception as e:
-        print(f"Warning: Could not generate hash for {file_path}: {e}")
-        return None
-
-def sliding_json(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False):
+def sliding_json(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False):
     """
     Process images from a JSON URL using sliding window detection.
     
@@ -1200,6 +855,8 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
         base_url (str): Base URL for converting relative paths to absolute URLs
         force (bool): Force reprocessing even if output already exists
         download_only (bool): Only download images, do not process them
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
         
     Returns:
         dict: Processing summary
@@ -1211,6 +868,8 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
         print(f"Base URL: {base_url}")
         print(f"Force reprocessing: {force}")
         print(f"Download only: {download_only}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
         print()
         
         # Create output directory
@@ -1233,7 +892,19 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                 padding=10
             )
             
-            yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+            # Initialize YOLO model with error handling
+            yolo_model = None
+            if ENABLE_YOLO_DETECTION:
+                try:
+                    yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                    print("YOLO model initialized successfully")
+                except Exception as e:
+                    print(f"Warning: Could not initialize YOLO model: {e}")
+                    print("Continuing without YOLO detection...")
+                    yolo_model = None
+            else:
+                print("YOLO detection disabled in configuration")
+            
             print("Detectors initialized successfully")
         
         # Process images
@@ -1416,7 +1087,9 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                     nudenet_detector, 
                     yolo_model,
                     image_type,
-                    force
+                    force,
+                    draw_rectangles,
+                    draw_labels
                 )
                 
                 if result['success']:
@@ -1463,7 +1136,7 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
             'message': f"Error: {str(e)}"
         }
 
-def category_thumbnails(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False):
+def category_thumbnails(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False):
     """
     Process category thumbnail images from a JSON URL using enhanced detection.
     
@@ -1473,6 +1146,8 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
         base_url (str): Base URL for converting relative paths to absolute URLs
         force (bool): Force reprocessing even if output already exists
         download_only (bool): Only download images, do not process them
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
         
     Returns:
         dict: Processing summary
@@ -1484,6 +1159,8 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
         print(f"Base URL: {base_url}")
         print(f"Force reprocessing: {force}")
         print(f"Download only: {download_only}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
         print()
         
         # Create output directory
@@ -1506,7 +1183,19 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
                 padding=10
             )
             
-            yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+            # Initialize YOLO model with error handling
+            yolo_model = None
+            if ENABLE_YOLO_DETECTION:
+                try:
+                    yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                    print("YOLO model initialized successfully")
+                except Exception as e:
+                    print(f"Warning: Could not initialize YOLO model: {e}")
+                    print("Continuing without YOLO detection...")
+                    yolo_model = None
+            else:
+                print("YOLO detection disabled in configuration")
+            
             print("Enhanced detectors initialized successfully")
         
         # Process images
@@ -1611,7 +1300,9 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
                     nudenet_detector, 
                     yolo_model,
                     'category_thumb',
-                    force
+                    force,
+                    draw_rectangles,
+                    draw_labels
                 )
                 
                 if result['success']:
@@ -1658,7 +1349,7 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
             'message': f"Error: {str(e)}"
         }
 
-def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False):
+def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False):
     """
     Process a single image using sliding window detection.
     
@@ -1667,6 +1358,8 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         output_dir (str): Directory to save processed images
         image_type (str): Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)
         force (bool): Force reprocessing even if output already exists
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
         
     Returns:
         dict: Processing summary
@@ -1677,6 +1370,8 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         print(f"Output directory: {output_dir}")
         print(f"Image type: {image_type}")
         print(f"Force reprocessing: {force}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
         print()
         
         # Check if input file exists
@@ -1697,7 +1392,19 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             padding=10
         )
         
-        yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+        # Initialize YOLO model with error handling
+        yolo_model = None
+        if ENABLE_YOLO_DETECTION:
+            try:
+                yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                print("YOLO model initialized successfully")
+            except Exception as e:
+                print(f"Warning: Could not initialize YOLO model: {e}")
+                print("Continuing without YOLO detection...")
+                yolo_model = None
+        else:
+            print("YOLO detection disabled in configuration")
+        
         print("Detectors initialized successfully")
         
         # Determine image type if not provided
@@ -1765,7 +1472,9 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             nudenet_detector, 
             yolo_model,
             image_type,
-            force
+            force,
+            draw_rectangles,
+            draw_labels
         )
         
         if result['success']:
@@ -1805,21 +1514,294 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             'message': f"Error: {str(e)}"
         }
 
+def blog_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False):
+    """
+    Process blog images from a JSON URL using enhanced detection.
+    
+    Args:
+        json_url (str): URL to JSON file containing blog image data
+        output_dir (str): Directory to save processed images
+        base_url (str): Base URL for converting relative paths to absolute URLs
+        force (bool): Force reprocessing even if output already exists
+        download_only (bool): Only download images, do not process them
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
+        
+    Returns:
+        dict: Processing summary
+    """
+    try:
+        print(f"=== Blog Images Processing ===")
+        print(f"JSON URL: {json_url}")
+        print(f"Output directory: {output_dir}")
+        print(f"Base URL: {base_url}")
+        print(f"Force reprocessing: {force}")
+        print(f"Download only: {download_only}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
+        print()
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Download JSON data
+        print("Downloading JSON data...")
+        response = requests.get(json_url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        print(f"JSON data loaded successfully")
+        
+        # Initialize detectors
+        if not download_only:
+            print("Initializing detectors...")
+            nudenet_detector = NudeNetDetector(
+                confidence_threshold=0.05,
+                pixel_size=15,
+                padding=10
+            )
+            
+            # Initialize YOLO model with error handling
+            yolo_model = None
+            if ENABLE_YOLO_DETECTION:
+                try:
+                    yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                    print("YOLO model initialized successfully")
+                except Exception as e:
+                    print(f"Warning: Could not initialize YOLO model: {e}")
+                    print("Continuing without YOLO detection...")
+                    yolo_model = None
+            else:
+                print("YOLO detection disabled in configuration")
+            
+            print("Detectors initialized successfully")
+        
+        # Process images
+        processed_count = 0
+        skipped_count = 0
+        error_count = 0
+        download_count = 0
+        
+        # Extract image URLs from JSON data
+        image_urls = []
+        
+        # Handle the blog images JSON structure
+        if isinstance(data, list):
+            # Direct list structure: [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]
+            for item in data:
+                if isinstance(item, dict):
+                    # Process blog_thumb (main blog image)
+                    if 'blog_thumb' in item:
+                        url = item['blog_thumb']
+                        if url:
+                            # Handle relative URLs with base_url
+                            if base_url and not url.startswith(('http://', 'https://')):
+                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                            image_urls.append({
+                                'url': url,
+                                'type': 'blog_image',
+                                'slug': item.get('slug', 'unknown'),
+                                'image_type': 'blog_thumb'
+                            })
+                    
+                    # Process images array (additional blog images)
+                    if 'images' in item and isinstance(item['images'], list):
+                        for i, url in enumerate(item['images']):
+                            if url:
+                                # Handle relative URLs with base_url
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'blog_image',
+                                    'slug': item.get('slug', 'unknown'),
+                                    'image_type': f'blog_image_{i+1}'
+                                })
+        
+        elif isinstance(data, dict):
+            # Check for nested structures
+            if 'data' in data and isinstance(data['data'], list):
+                # Structure: {"data": [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]}
+                for item in data['data']:
+                    if isinstance(item, dict):
+                        # Process blog_thumb (main blog image)
+                        if 'blog_thumb' in item:
+                            url = item['blog_thumb']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'blog_image',
+                                    'slug': item.get('slug', 'unknown'),
+                                    'image_type': 'blog_thumb'
+                                })
+                        
+                        # Process images array (additional blog images)
+                        if 'images' in item and isinstance(item['images'], list):
+                            for i, url in enumerate(item['images']):
+                                if url:
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'blog_image',
+                                        'slug': item.get('slug', 'unknown'),
+                                        'image_type': f'blog_image_{i+1}'
+                                    })
+            
+            elif 'blog_images' in data and isinstance(data['blog_images'], list):
+                # Structure: {"blog_images": [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]}
+                for item in data['blog_images']:
+                    if isinstance(item, dict):
+                        # Process blog_thumb (main blog image)
+                        if 'blog_thumb' in item:
+                            url = item['blog_thumb']
+                            if url:
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'blog_image',
+                                    'slug': item.get('slug', 'unknown'),
+                                    'image_type': 'blog_thumb'
+                                })
+                        
+                        # Process images array (additional blog images)
+                        if 'images' in item and isinstance(item['images'], list):
+                            for i, url in enumerate(item['images']):
+                                if url:
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'blog_image',
+                                        'slug': item.get('slug', 'unknown'),
+                                        'image_type': f'blog_image_{i+1}'
+                                    })
+        
+        print(f"Found {len(image_urls)} blog image URLs to process")
+        
+        for i, image_data in enumerate(image_urls, 1):
+            try:
+                print(f"\n[{i}/{len(image_urls)}] Processing: {image_data['url']}")
+                print(f"  Blog ID: {image_data['slug']}, Image Type: {image_data['image_type']}")
+                
+                # Download image
+                downloaded_path = download_image(image_data['url'])
+                if not downloaded_path:
+                    error_count += 1
+                    continue
+                
+                download_count += 1
+                
+                if download_only:
+                    continue
+                
+                # Determine output path with WordPress structure for blog images
+                filename = os.path.basename(downloaded_path)
+                
+                # Create a more descriptive filename based on blog slug and image type
+                name, ext = os.path.splitext(filename)
+                if image_data['image_type'] == 'blog_thumb':
+                    new_filename = f"{image_data['slug']}_thumb{ext}"
+                else:
+                    # For blog_image_1, blog_image_2, etc.
+                    new_filename = f"{image_data['slug']}_{image_data['image_type']}{ext}"
+                
+                # Save in wp-content/uploads/blog-images
+                wp_upload_dir = os.path.join('wp-content', 'uploads', 'blog-images')
+                output_path = os.path.join(wp_upload_dir, new_filename)
+                
+                # Create output directory
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                
+                # Check if already processed
+                if os.path.exists(output_path) and not force:
+                    print(f"  Skipped (already exists): {output_path}")
+                    skipped_count += 1
+                    continue
+                
+                # Process the image with enhanced detection (no resizing)
+                result = process_single_image_enhanced(
+                    downloaded_path, 
+                    output_path, 
+                    nudenet_detector, 
+                    yolo_model,
+                    image_data['image_type'],
+                    force,
+                    draw_rectangles,
+                    draw_labels
+                )
+                
+                if result['success']:
+                    processed_count += 1
+                    print(f"  Success: {output_path}")
+                    print(f"    NudeNet detections: {result['nudenet_detections']}")
+                    print(f"    YOLO detections: {result['yolo_detections']}")
+                    print(f"    WordPress files: {len(result['wordpress_files'])}")
+                else:
+                    error_count += 1
+                    print(f"  Failed: {result['message']}")
+                
+            except Exception as e:
+                error_count += 1
+                print(f"  Error processing {image_data['url']}: {e}")
+                continue
+        
+        # Summary
+        print(f"\n=== Blog Images Processing Summary ===")
+        print(f"Total blog images: {len(image_urls)}")
+        print(f"Downloaded: {download_count}")
+        if not download_only:
+            print(f"Processed: {processed_count}")
+            print(f"Skipped: {skipped_count}")
+        print(f"Errors: {error_count}")
+        
+        # Show database statistics
+        if not download_only:
+            db_tracker.get_processing_stats()
+        
+        return {
+            'success': True,
+            'total_blog_images': len(image_urls),
+            'downloaded': download_count,
+            'processed': processed_count if not download_only else 0,
+            'skipped': skipped_count if not download_only else 0,
+            'errors': error_count
+        }
+        
+    except Exception as e:
+        print(f"Error in blog_images: {e}")
+        return {
+            'success': False,
+            'message': f"Error: {str(e)}"
+        }
+
 def main():
     """
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
-    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single'], help='Command to execute')
-    parser.add_argument('--json-url', help='URL to JSON file containing image data (for sliding-json and category-thumbnails)')
+    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images'], help='Command to execute')
+    parser.add_argument('--json-url', help='URL to JSON file containing image data (for sliding-json, category-thumbnails, and blog-images)')
     parser.add_argument('--image-path', help='Path to input image file (for sliding-single)')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
     parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--base-url', help='Base URL for converting relative paths to absolute URLs')
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if output already exists')
     parser.add_argument('--download-only', action='store_true', help='Only download images, do not process them')
+    parser.add_argument('--disable-yolo', action='store_true', help='Disable YOLO detection (use only NudeNet)')
+    parser.add_argument('--draw-rectangles', action='store_true', help='Draw rectangles around detected regions for debugging')
+    parser.add_argument('--draw-labels', action='store_true', help='Draw labels on rectangles (requires --draw-rectangles)')
     
     args = parser.parse_args()
+    
+    # Update global YOLO configuration based on command line argument
+    global ENABLE_YOLO_DETECTION
+    if args.disable_yolo:
+        ENABLE_YOLO_DETECTION = False
+        print("⚠️ YOLO detection disabled via command line argument")
     
     if args.command == 'sliding-json':
         if not args.json_url:
@@ -1831,7 +1813,9 @@ def main():
             output_dir=args.output_dir,
             base_url=args.base_url,
             force=args.force,
-            download_only=args.download_only
+            download_only=args.download_only,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
         )
         
         if not result['success']:
@@ -1851,7 +1835,9 @@ def main():
             output_dir=args.output_dir,
             base_url=args.base_url,
             force=args.force,
-            download_only=args.download_only
+            download_only=args.download_only,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
         )
         
         if not result['success']:
@@ -1870,7 +1856,31 @@ def main():
             image_path=args.image_path,
             output_dir=args.output_dir,
             image_type=args.image_type,
-            force=args.force
+            force=args.force,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
+        )
+        
+        if not result['success']:
+            print(f"❌ {result['message']}")
+            return 1
+        
+        print("✅ Processing completed successfully!")
+        return 0
+        
+    elif args.command == 'blog-images':
+        if not args.json_url:
+            print("❌ --json-url is required for blog-images command")
+            return 1
+            
+        result = blog_images(
+            json_url=args.json_url,
+            output_dir=args.output_dir,
+            base_url=args.base_url,
+            force=args.force,
+            download_only=args.download_only,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
         )
         
         if not result['success']:

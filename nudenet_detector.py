@@ -674,10 +674,12 @@ class NudeNetDetector:
         try:
             print(f"Processing image: {input_path}")
             
-            # Run detection
+            # Run detection with enhanced approach
             if use_sliding_window:
-                detections = self.detect_with_sliding_window(input_path)
+                # Use the new enhanced detection that processes full image first
+                detections = self.detect_with_full_image_first(input_path)
             else:
+                # Use simple enhanced detection for smaller images
                 detections = self.detect_enhanced(input_path)
             
             if not detections:
@@ -704,4 +706,109 @@ class NudeNetDetector:
                 'success': False,
                 'detection_count': 0,
                 'message': f'Error: {str(e)}'
-            } 
+            }
+    
+    def detect_with_full_image_first(self, input_path, window_size=(256, 256), step_size=128, enhancement_factor=1.5):
+        """
+        Enhanced detection that first processes the full image for large body parts,
+        then uses sliding window for smaller details.
+        
+        Args:
+            input_path (str): Path to input image
+            window_size (tuple): Size of sliding window (width, height)
+            step_size (int): Step size for sliding window
+            enhancement_factor (float): Enhancement factor for preprocessing
+            
+        Returns:
+            List of detection dictionaries
+        """
+        img = cv2.imread(input_path)
+        if img is None:
+            print(f"Error: Could not load image {input_path}")
+            return []
+        
+        h, w = img.shape[:2]
+        print(f"Processing image: {w}x{h}")
+        
+        all_detections = []
+        
+        # Step 1: Process full image for large body parts
+        print("Step 1: Processing full image for large body parts...")
+        full_image_detections = self.detect_enhanced(input_path, enhancement_factor)
+        
+        # Filter for allowed labels
+        full_image_filtered = [d for d in full_image_detections if d['class'] in self.allowed_labels]
+        
+        print(f"  Full image detections: {len(full_image_filtered)}")
+        for detection in full_image_filtered:
+            detection['source'] = 'full_image'
+            all_detections.append(detection)
+        
+        # Step 2: Determine if sliding window is needed based on image size and existing detections
+        # Use sliding window if image is large (> 800x600) or if no large detections found
+        image_area = w * h
+        large_image_threshold = 800 * 600
+        
+        # Check if we have large detections (covering significant area)
+        large_detections_found = False
+        for detection in full_image_filtered:
+            x, y, w_det, h_det = detection['box']
+            detection_area = w_det * h_det
+            area_ratio = detection_area / image_area
+            
+            # Consider it large if it covers more than 5% of the image
+            if area_ratio > 0.05:
+                large_detections_found = True
+                break
+        
+        # Step 3: Use sliding window for smaller details if needed
+        if image_area > large_image_threshold or not large_detections_found:
+            print("Step 2: Using sliding window for smaller details...")
+            
+            # Adjust window size based on image size
+            if image_area > 2000 * 1500:  # Very large images
+                window_size = (512, 512)
+                step_size = 256
+            elif image_area > 1500 * 1000:  # Large images
+                window_size = (384, 384)
+                step_size = 192
+            else:  # Medium images
+                window_size = (256, 256)
+                step_size = 128
+            
+            print(f"  Adjusted window size: {window_size}, step size: {step_size}")
+            
+            window_detections = self.detect_with_sliding_window(
+                input_path, 
+                window_size=window_size, 
+                step_size=step_size, 
+                enhancement_factor=enhancement_factor
+            )
+            
+            # Mark sliding window detections
+            for detection in window_detections:
+                detection['source'] = 'sliding_window'
+            
+            all_detections.extend(window_detections)
+            print(f"  Sliding window detections: {len(window_detections)}")
+        else:
+            print("Step 2: Skipping sliding window (large detections found)")
+        
+        # Step 4: Remove duplicates between full image and sliding window detections
+        if len(all_detections) > 1:
+            print("Step 3: Removing duplicate detections...")
+            unique_detections = self.remove_duplicate_detections(all_detections, iou_threshold=0.4)
+            print(f"  Unique detections after deduplication: {len(unique_detections)}")
+            
+            # Count by source
+            full_image_count = len([d for d in unique_detections if d.get('source') == 'full_image'])
+            sliding_window_count = len([d for d in unique_detections if d.get('source') == 'sliding_window'])
+            
+            print(f"  Final breakdown:")
+            print(f"    Full image detections: {full_image_count}")
+            print(f"    Sliding window detections: {sliding_window_count}")
+            
+            return unique_detections
+        else:
+            print(f"Step 3: No duplicates to remove (total: {len(all_detections)})")
+            return all_detections 
