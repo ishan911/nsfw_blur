@@ -884,7 +884,7 @@ def process_with_sliding_window(input_path, window_size=(256, 256), step_size=12
 
 def main():
     # Configuration
-    input_path = "data/1383_9dc65c89_thumb.jpg"  # Change this to your image path
+    input_path = "data/685fdc542b226169d869563d.jpg"  # Change this to your image path
     confidence_threshold = 0.05  # Adjust this threshold as needed
     use_enhanced_detection = True  # Set to True for better detection on darker bodies and small parts
     enhancement_factor = 1.5  # Brightness/contrast enhancement factor
