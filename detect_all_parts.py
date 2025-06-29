@@ -96,6 +96,25 @@ def preprocess_image_for_small_parts(image_path, enhancement_factor=1.5):
         hist_eq = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
         preprocessed_images.append(('histogram_equalized', hist_eq, original_size))
         
+        # Grayscale enhancement for better detection
+        # Convert to grayscale and apply CLAHE
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        clahe_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced_gray = clahe_gray.apply(gray)
+        # Convert back to BGR for NudeNet
+        enhanced_gray_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_enhanced', enhanced_gray_bgr, original_size))
+        
+        # Grayscale with contrast enhancement
+        enhanced_gray_contrast = cv2.convertScaleAbs(enhanced_gray, alpha=1.3, beta=10)
+        enhanced_gray_contrast_bgr = cv2.cvtColor(enhanced_gray_contrast, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_contrast_enhanced', enhanced_gray_contrast_bgr, original_size))
+        
+        # Grayscale with brightness enhancement
+        enhanced_gray_bright = cv2.convertScaleAbs(enhanced_gray, alpha=1.0, beta=30)
+        enhanced_gray_bright_bgr = cv2.cvtColor(enhanced_gray_bright, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_brightness_enhanced', enhanced_gray_bright_bgr, original_size))
+        
         return preprocessed_images
         
     except Exception as e:
@@ -701,6 +720,25 @@ def preprocess_image_for_dark_bodies(image_path, enhancement_factor=1.5):
         hist_eq = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
         preprocessed_images.append(('histogram_equalized', hist_eq))
         
+        # Grayscale enhancement for better detection
+        # Convert to grayscale and apply CLAHE
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        clahe_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced_gray = clahe_gray.apply(gray)
+        # Convert back to BGR for NudeNet
+        enhanced_gray_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_enhanced', enhanced_gray_bgr))
+        
+        # Grayscale with contrast enhancement
+        enhanced_gray_contrast = cv2.convertScaleAbs(enhanced_gray, alpha=1.3, beta=10)
+        enhanced_gray_contrast_bgr = cv2.cvtColor(enhanced_gray_contrast, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_contrast_enhanced', enhanced_gray_contrast_bgr))
+        
+        # Grayscale with brightness enhancement
+        enhanced_gray_bright = cv2.convertScaleAbs(enhanced_gray, alpha=1.0, beta=30)
+        enhanced_gray_bright_bgr = cv2.cvtColor(enhanced_gray_bright, cv2.COLOR_GRAY2BGR)
+        preprocessed_images.append(('grayscale_brightness_enhanced', enhanced_gray_bright_bgr))
+        
         return preprocessed_images
         
     except Exception as e:
@@ -723,13 +761,24 @@ def sliding_window(image, step_size, window_size):
 
 # Only use these body part labels
 ALLOWED_LABELS = set([
+    "FEMALE_GENITALIA_COVERED",
+    "FACE_FEMALE",
     "BUTTOCKS_EXPOSED",
-    "BUTTOCKS_COVERED",
     "FEMALE_BREAST_EXPOSED",
     "FEMALE_GENITALIA_EXPOSED",
-    "FEMALE_GENITALIA_COVERED",
+    "MALE_BREAST_EXPOSED",
     "ANUS_EXPOSED",
+    "FEET_EXPOSED",
+    "BELLY_COVERED",
+    "FEET_COVERED",
+    "ARMPITS_COVERED",
+    "ARMPITS_EXPOSED",
+    "FACE_MALE",
+    "BELLY_EXPOSED",
     "MALE_GENITALIA_EXPOSED",
+    "ANUS_COVERED",
+    "FEMALE_BREAST_COVERED",
+    "BUTTOCKS_COVERED",
 ])
 
 def process_with_sliding_window(input_path, window_size=(256, 256), step_size=128, confidence_threshold=0.05, enhancement_factor=1.5):
@@ -809,8 +858,8 @@ def process_with_sliding_window(input_path, window_size=(256, 256), step_size=12
             "Sliding Window Combined Detections",
             pixelate=True,
             pixel_size=15,
-            draw_rectangles=False,
-            draw_labels=False
+            draw_rectangles=True,
+            draw_labels=True
         )
         print(f"  Combined output saved: {output_path}")
         
@@ -821,7 +870,7 @@ def process_with_sliding_window(input_path, window_size=(256, 256), step_size=12
 
 def main():
     # Configuration
-    input_path = "data/1383_9dc65c89_thumb.jpg"  # Change this to your image path
+    input_path = "data/150_3d9aa247_thumb.jpg"  # Change this to your image path
     confidence_threshold = 0.05  # Adjust this threshold as needed
     use_enhanced_detection = True  # Set to True for better detection on darker bodies and small parts
     enhancement_factor = 1.5  # Brightness/contrast enhancement factor
@@ -832,7 +881,7 @@ def main():
     # Pixelation configuration
     pixelate_detections = True  # Set to True to pixelate detected regions
     pixel_size = 15  # Size of pixel blocks (higher = more pixelated)
-    draw_rectangle_borders = False  # Set to True to draw colored borders around detections
+    draw_rectangle_borders = True  # Set to True to draw colored borders around detections
     draw_labels = False  # Set to True to draw labels (only used if draw_rectangle_borders=True)
     
     print("=== NudeNet Detection Script (Enhanced for Dark Bodies & Small Parts) ===")
@@ -850,6 +899,9 @@ def main():
         print("  - Brightness/contrast adjustments")
         print("  - Gamma correction")
         print("  - Histogram equalization")
+        print("  - Grayscale enhancement with CLAHE")
+        print("  - Grayscale with contrast enhancement")
+        print("  - Grayscale with brightness enhancement")
         print("  - Automatic bounding box scaling")
     print()
     
