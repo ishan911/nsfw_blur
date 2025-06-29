@@ -4,5 +4,9 @@ wp-content
 data
 dist
 build
+runs
+downloads
+custom_processed
+backups
 .venv
 **/__pycache__
