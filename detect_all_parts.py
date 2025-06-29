@@ -137,6 +137,18 @@ def run_nudenet_detection_enhanced(image_path, confidence_threshold=0.1, enhance
         # Initialize NudeNet detector
         detector = NudeDetector()
         
+        # Allowed labels for filtering (same as in nudenet_detector.py and main.py)
+        allowed_labels = set([
+            "BUTTOCKS_EXPOSED",
+            "BUTTOCKS_COVERED",
+            # "FEMALE_BREAST_EXPOSED",
+            "FEMALE_GENITALIA_EXPOSED",
+            "FEMALE_GENITALIA_COVERED",
+            "ANUS_COVERED",
+            "ANUS_EXPOSED",
+            "MALE_GENITALIA_EXPOSED",
+        ])
+        
         # Get preprocessed images (now includes upscaled versions)
         preprocessed_images = preprocess_image_for_small_parts(image_path, enhancement_factor)
         
@@ -155,10 +167,10 @@ def run_nudenet_detection_enhanced(image_path, confidence_threshold=0.1, enhance
                 # Run detection on this preprocessed version
                 detections = detector.detect(temp_path)
                 
-                # Filter by confidence threshold
+                # Filter by confidence threshold and allowed labels
                 filtered_detections = []
                 for detection in detections:
-                    if detection['score'] >= confidence_threshold:
+                    if detection['score'] >= confidence_threshold and detection['class'] in allowed_labels:
                         # Add preprocessing type info
                         detection['preprocess_type'] = preprocess_type
                         detection['image_size'] = img_size
@@ -450,13 +462,25 @@ def run_nudenet_detection(image_path, confidence_threshold=0.1):
         # Initialize NudeNet detector
         detector = NudeDetector()
         
+        # Allowed labels for filtering (same as in nudenet_detector.py and main.py)
+        allowed_labels = set([
+            "BUTTOCKS_EXPOSED",
+            "BUTTOCKS_COVERED",
+            "FEMALE_BREAST_EXPOSED",
+            "FEMALE_GENITALIA_EXPOSED",
+            "FEMALE_GENITALIA_COVERED",
+            "ANUS_COVERED",
+            "ANUS_EXPOSED",
+            "MALE_GENITALIA_EXPOSED",
+        ])
+        
         # Run detection
         detections = detector.detect(image_path)
         
-        # Filter by confidence threshold
+        # Filter by confidence threshold and allowed labels
         filtered_detections = []
         for detection in detections:
-            if detection['score'] >= confidence_threshold:
+            if detection['score'] >= confidence_threshold and detection['class'] in allowed_labels:
                 filtered_detections.append(detection)
         
         return filtered_detections
@@ -759,26 +783,16 @@ def sliding_window(image, step_size, window_size):
         for x in range(0, image.shape[1] - window_size[0] + 1, step_size):
             yield (x, y, image[y:y + window_size[1], x:x + window_size[0]])
 
-# Only use these body part labels
+# Only use these body part labels (filtered to sensitive content only)
 ALLOWED_LABELS = set([
-    "FEMALE_GENITALIA_COVERED",
-    "FACE_FEMALE",
     "BUTTOCKS_EXPOSED",
+    "BUTTOCKS_COVERED",
     "FEMALE_BREAST_EXPOSED",
     "FEMALE_GENITALIA_EXPOSED",
-    "MALE_BREAST_EXPOSED",
-    "ANUS_EXPOSED",
-    "FEET_EXPOSED",
-    "BELLY_COVERED",
-    "FEET_COVERED",
-    "ARMPITS_COVERED",
-    "ARMPITS_EXPOSED",
-    "FACE_MALE",
-    "BELLY_EXPOSED",
-    "MALE_GENITALIA_EXPOSED",
+    "FEMALE_GENITALIA_COVERED",
     "ANUS_COVERED",
-    "FEMALE_BREAST_COVERED",
-    "BUTTOCKS_COVERED",
+    "ANUS_EXPOSED",
+    "MALE_GENITALIA_EXPOSED",
 ])
 
 def process_with_sliding_window(input_path, window_size=(256, 256), step_size=128, confidence_threshold=0.05, enhancement_factor=1.5):
@@ -870,7 +884,7 @@ def process_with_sliding_window(input_path, window_size=(256, 256), step_size=12
 
 def main():
     # Configuration
-    input_path = "data/150_3d9aa247_thumb.jpg"  # Change this to your image path
+    input_path = "data/1383_9dc65c89_thumb.jpg"  # Change this to your image path
     confidence_threshold = 0.05  # Adjust this threshold as needed
     use_enhanced_detection = True  # Set to True for better detection on darker bodies and small parts
     enhancement_factor = 1.5  # Brightness/contrast enhancement factor
