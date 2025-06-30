@@ -875,6 +875,10 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "sliding")
+        os.makedirs(backup_dir, exist_ok=True)
+        
         # Download JSON data
         print("Downloading JSON data...")
         response = requests.get(json_url, timeout=30)
@@ -1041,6 +1045,14 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                 
                 download_count += 1
                 
+                # Create backup of original image
+                backup_filename = f"{image_data['slug']}_{image_data['type']}_{os.path.basename(downloaded_path)}"
+                backup_path = os.path.join(backup_dir, backup_filename)
+                if not os.path.exists(backup_path):
+                    import shutil
+                    shutil.copy2(downloaded_path, backup_path)
+                    print(f"  📁 Backed up to: {backup_path}")
+                
                 if download_only:
                     continue
                 
@@ -1166,6 +1178,10 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "category")
+        os.makedirs(backup_dir, exist_ok=True)
+        
         # Download JSON data
         print("Downloading JSON data...")
         response = requests.get(json_url, timeout=30)
@@ -1273,6 +1289,14 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
                     continue
                 
                 download_count += 1
+                
+                # Create backup of original image
+                backup_filename = f"{image_data['slug']}_{image_data['type']}_{os.path.basename(downloaded_path)}"
+                backup_path = os.path.join(backup_dir, backup_filename)
+                if not os.path.exists(backup_path):
+                    import shutil
+                    shutil.copy2(downloaded_path, backup_path)
+                    print(f"  📁 Backed up to: {backup_path}")
                 
                 if download_only:
                     continue
@@ -1384,6 +1408,10 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "single")
+        os.makedirs(backup_dir, exist_ok=True)
+        
         # Initialize detectors
         print("Initializing detectors...")
         nudenet_detector = NudeNetDetector(
@@ -1463,6 +1491,14 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
                 'skipped': 1,
                 'errors': 0
             }
+        
+        # Create backup of original image
+        backup_filename = f"{image_type}_{os.path.basename(image_path)}"
+        backup_path = os.path.join(backup_dir, backup_filename)
+        if not os.path.exists(backup_path):
+            import shutil
+            shutil.copy2(image_path, backup_path)
+            print(f"  📁 Backed up to: {backup_path}")
         
         # Process the image
         print(f"Processing image: {filename}")
@@ -1544,6 +1580,10 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
         
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "blogs")
+        os.makedirs(backup_dir, exist_ok=True)
+        
         # Download JSON data
         print("Downloading JSON data...")
         response = requests.get(json_url, timeout=30)
@@ -1585,99 +1625,72 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         # Extract image URLs from JSON data
         image_urls = []
         
-        # Handle the blog images JSON structure
+        # Handle the new blog images JSON structure with WordPress sizes
         if isinstance(data, list):
-            # Direct list structure: [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]
+            # New structure: [{"slug": "blog_slug", "images": {"thumbnail": "url", "medium": "url", ...}}, ...]
             for item in data:
-                if isinstance(item, dict):
-                    # Process blog_thumb (main blog image)
-                    if 'blog_thumb' in item:
-                        url = item['blog_thumb']
-                        if url:
-                            # Handle relative URLs with base_url
-                            if base_url and not url.startswith(('http://', 'https://')):
-                                url = base_url.rstrip('/') + '/' + url.lstrip('/')
-                            image_urls.append({
-                                'url': url,
-                                'type': 'blog_image',
-                                'slug': item.get('slug', 'unknown'),
-                                'image_type': 'blog_thumb'
-                            })
+                if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                    slug = item['slug']
+                    images_obj = item['images']
                     
-                    # Process images array (additional blog images)
-                    if 'images' in item and isinstance(item['images'], list):
-                        for i, url in enumerate(item['images']):
-                            if url:
+                    if isinstance(images_obj, dict):
+                        # Process each WordPress size
+                        for size_name, url in images_obj.items():
+                            if url and isinstance(url, str):
                                 # Handle relative URLs with base_url
                                 if base_url and not url.startswith(('http://', 'https://')):
                                     url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                
                                 image_urls.append({
                                     'url': url,
                                     'type': 'blog_image',
-                                    'slug': item.get('slug', 'unknown'),
-                                    'image_type': f'blog_image_{i+1}'
+                                    'slug': slug,
+                                    'image_type': size_name,
+                                    'size_name': size_name
                                 })
         
         elif isinstance(data, dict):
             # Check for nested structures
             if 'data' in data and isinstance(data['data'], list):
-                # Structure: {"data": [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]}
+                # Structure: {"data": [{"slug": "blog_slug", "images": {"thumbnail": "url", ...}}, ...]}
                 for item in data['data']:
-                    if isinstance(item, dict):
-                        # Process blog_thumb (main blog image)
-                        if 'blog_thumb' in item:
-                            url = item['blog_thumb']
-                            if url:
-                                if base_url and not url.startswith(('http://', 'https://')):
-                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
-                                image_urls.append({
-                                    'url': url,
-                                    'type': 'blog_image',
-                                    'slug': item.get('slug', 'unknown'),
-                                    'image_type': 'blog_thumb'
-                                })
+                    if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                        slug = item['slug']
+                        images_obj = item['images']
                         
-                        # Process images array (additional blog images)
-                        if 'images' in item and isinstance(item['images'], list):
-                            for i, url in enumerate(item['images']):
-                                if url:
+                        if isinstance(images_obj, dict):
+                            for size_name, url in images_obj.items():
+                                if url and isinstance(url, str):
                                     if base_url and not url.startswith(('http://', 'https://')):
                                         url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
                                     image_urls.append({
                                         'url': url,
                                         'type': 'blog_image',
-                                        'slug': item.get('slug', 'unknown'),
-                                        'image_type': f'blog_image_{i+1}'
+                                        'slug': slug,
+                                        'image_type': size_name,
+                                        'size_name': size_name
                                     })
             
             elif 'blog_images' in data and isinstance(data['blog_images'], list):
-                # Structure: {"blog_images": [{"slug": "blog_slug", "blog_thumb": "blog_image_url", "images": ["image_1_url", "image_2_url"]}, ...]}
+                # Structure: {"blog_images": [{"slug": "blog_slug", "images": {"thumbnail": "url", ...}}, ...]}
                 for item in data['blog_images']:
-                    if isinstance(item, dict):
-                        # Process blog_thumb (main blog image)
-                        if 'blog_thumb' in item:
-                            url = item['blog_thumb']
-                            if url:
-                                if base_url and not url.startswith(('http://', 'https://')):
-                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
-                                image_urls.append({
-                                    'url': url,
-                                    'type': 'blog_image',
-                                    'slug': item.get('slug', 'unknown'),
-                                    'image_type': 'blog_thumb'
-                                })
+                    if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                        slug = item['slug']
+                        images_obj = item['images']
                         
-                        # Process images array (additional blog images)
-                        if 'images' in item and isinstance(item['images'], list):
-                            for i, url in enumerate(item['images']):
-                                if url:
+                        if isinstance(images_obj, dict):
+                            for size_name, url in images_obj.items():
+                                if url and isinstance(url, str):
                                     if base_url and not url.startswith(('http://', 'https://')):
                                         url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
                                     image_urls.append({
                                         'url': url,
                                         'type': 'blog_image',
-                                        'slug': item.get('slug', 'unknown'),
-                                        'image_type': f'blog_image_{i+1}'
+                                        'slug': slug,
+                                        'image_type': size_name,
+                                        'size_name': size_name
                                     })
         
         print(f"Found {len(image_urls)} blog image URLs to process")
@@ -1685,7 +1698,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         for i, image_data in enumerate(image_urls, 1):
             try:
                 print(f"\n[{i}/{len(image_urls)}] Processing: {image_data['url']}")
-                print(f"  Blog ID: {image_data['slug']}, Image Type: {image_data['image_type']}")
+                print(f"  Blog ID: {image_data['slug']}, Size: {image_data['size_name']}")
                 
                 # Download image
                 downloaded_path = download_image(image_data['url'])
@@ -1695,19 +1708,23 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                 
                 download_count += 1
                 
+                # Create backup of original image
+                backup_filename = f"{image_data['slug']}_{image_data['size_name']}_{os.path.basename(downloaded_path)}"
+                backup_path = os.path.join(backup_dir, backup_filename)
+                if not os.path.exists(backup_path):
+                    import shutil
+                    shutil.copy2(downloaded_path, backup_path)
+                    print(f"  📁 Backed up to: {backup_path}")
+                
                 if download_only:
                     continue
                 
                 # Determine output path with WordPress structure for blog images
                 filename = os.path.basename(downloaded_path)
                 
-                # Create a more descriptive filename based on blog slug and image type
+                # Create a more descriptive filename based on blog slug and size name
                 name, ext = os.path.splitext(filename)
-                if image_data['image_type'] == 'blog_thumb':
-                    new_filename = f"{image_data['slug']}_thumb{ext}"
-                else:
-                    # For blog_image_1, blog_image_2, etc.
-                    new_filename = f"{image_data['slug']}_{image_data['image_type']}{ext}"
+                new_filename = f"{image_data['slug']}_{image_data['size_name']}{ext}"
                 
                 # Save in wp-content/uploads/blog-images
                 wp_upload_dir = os.path.join('wp-content', 'uploads', 'blog-images')
@@ -1764,7 +1781,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         
         return {
             'success': True,
-            'total_blog_images': len(image_urls),
+            'total_images': len(image_urls),
             'downloaded': download_count,
             'processed': processed_count if not download_only else 0,
             'skipped': skipped_count if not download_only else 0,
@@ -1775,7 +1792,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         print(f"Error in blog_images: {e}")
         return {
             'success': False,
-            'message': f"Error: {str(e)}"
+            'error': str(e)
         }
 
 def main():
@@ -1884,7 +1901,7 @@ def main():
         )
         
         if not result['success']:
-            print(f"❌ {result['message']}")
+            print(f"❌ {result['error']}")
             return 1
         
         print("✅ Processing completed successfully!")
