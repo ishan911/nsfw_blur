@@ -1779,9 +1779,8 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                 # Determine output path with WordPress structure for blog images
                 filename = os.path.basename(downloaded_path)
                 
-                # Create a more descriptive filename based on blog slug and size name
-                name, ext = os.path.splitext(filename)
-                new_filename = f"{image_data['slug']}_{image_data['size_name']}{ext}"
+                # Use original filename (preserve case and original name)
+                new_filename = filename
                 
                 # Save in wp-content/uploads/blog-images
                 wp_upload_dir = os.path.join('wp-content', 'uploads', 'blog-images')
