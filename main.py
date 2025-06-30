@@ -1627,15 +1627,30 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         
         # Handle the new blog images JSON structure with WordPress sizes
         if isinstance(data, list):
-            # New structure: [{"slug": "blog_slug", "images": {"thumbnail": "url", "medium": "url", ...}}, ...]
+            # New structure: [{"slug": "blog_slug", "images": ["url1", "url2", ...]}, ...]
             for item in data:
                 if isinstance(item, dict) and 'slug' in item and 'images' in item:
                     slug = item['slug']
-                    images_obj = item['images']
+                    images_data = item['images']
                     
-                    if isinstance(images_obj, dict):
-                        # Process each WordPress size
-                        for size_name, url in images_obj.items():
+                    if isinstance(images_data, list):
+                        # Process each URL in the images array
+                        for i, url in enumerate(images_data):
+                            if url and isinstance(url, str):
+                                # Handle relative URLs with base_url
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'blog_image',
+                                    'slug': slug,
+                                    'image_type': f'image_{i+1}',
+                                    'size_name': f'image_{i+1}'
+                                })
+                    elif isinstance(images_data, dict):
+                        # Legacy structure: {"thumbnail": "url", "medium": "url", ...}
+                        for size_name, url in images_data.items():
                             if url and isinstance(url, str):
                                 # Handle relative URLs with base_url
                                 if base_url and not url.startswith(('http://', 'https://')):
@@ -1648,6 +1663,20 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                                     'image_type': size_name,
                                     'size_name': size_name
                                 })
+                    elif isinstance(images_data, list):
+                        # New structure: ["url1", "url2", ...]
+                        for i, url in enumerate(images_data):
+                            if url and isinstance(url, str):
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'blog_image',
+                                    'slug': slug,
+                                    'image_type': f'image_{i+1}',
+                                    'size_name': f'image_{i+1}'
+                                })
         
         elif isinstance(data, dict):
             # Check for nested structures
@@ -1656,10 +1685,10 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                 for item in data['data']:
                     if isinstance(item, dict) and 'slug' in item and 'images' in item:
                         slug = item['slug']
-                        images_obj = item['images']
+                        images_data = item['images']
                         
-                        if isinstance(images_obj, dict):
-                            for size_name, url in images_obj.items():
+                        if isinstance(images_data, dict):
+                            for size_name, url in images_data.items():
                                 if url and isinstance(url, str):
                                     if base_url and not url.startswith(('http://', 'https://')):
                                         url = base_url.rstrip('/') + '/' + url.lstrip('/')
@@ -1671,16 +1700,30 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                                         'image_type': size_name,
                                         'size_name': size_name
                                     })
+                        elif isinstance(images_data, list):
+                            # New structure: ["url1", "url2", ...]
+                            for i, url in enumerate(images_data):
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'blog_image',
+                                        'slug': slug,
+                                        'image_type': f'image_{i+1}',
+                                        'size_name': f'image_{i+1}'
+                                    })
             
             elif 'blog_images' in data and isinstance(data['blog_images'], list):
-                # Structure: {"blog_images": [{"slug": "blog_slug", "images": {"thumbnail": "url", ...}}, ...]}
+                # Structure: {"blog_images": [{"slug": "blog_slug", "images": ["url1", "url2", ...]}, ...]}
                 for item in data['blog_images']:
                     if isinstance(item, dict) and 'slug' in item and 'images' in item:
                         slug = item['slug']
-                        images_obj = item['images']
+                        images_data = item['images']
                         
-                        if isinstance(images_obj, dict):
-                            for size_name, url in images_obj.items():
+                        if isinstance(images_data, dict):
+                            for size_name, url in images_data.items():
                                 if url and isinstance(url, str):
                                     if base_url and not url.startswith(('http://', 'https://')):
                                         url = base_url.rstrip('/') + '/' + url.lstrip('/')
@@ -1691,6 +1734,20 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                                         'slug': slug,
                                         'image_type': size_name,
                                         'size_name': size_name
+                                    })
+                        elif isinstance(images_data, list):
+                            # New structure: ["url1", "url2", ...]
+                            for i, url in enumerate(images_data):
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'blog_image',
+                                        'slug': slug,
+                                        'image_type': f'image_{i+1}',
+                                        'size_name': f'image_{i+1}'
                                     })
         
         print(f"Found {len(image_urls)} blog image URLs to process")
