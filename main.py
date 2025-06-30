@@ -1046,7 +1046,7 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                 download_count += 1
                 
                 # Create backup of original image
-                backup_filename = f"{image_data['slug']}_{image_data['type']}_{os.path.basename(downloaded_path)}"
+                backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
                     import shutil
@@ -1291,7 +1291,7 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
                 download_count += 1
                 
                 # Create backup of original image
-                backup_filename = f"{image_data['slug']}_{image_data['type']}_{os.path.basename(downloaded_path)}"
+                backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
                     import shutil
@@ -1493,7 +1493,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             }
         
         # Create backup of original image
-        backup_filename = f"{image_type}_{os.path.basename(image_path)}"
+        backup_filename = os.path.basename(image_path)
         backup_path = os.path.join(backup_dir, backup_filename)
         if not os.path.exists(backup_path):
             import shutil
@@ -1709,7 +1709,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                 download_count += 1
                 
                 # Create backup of original image
-                backup_filename = f"{image_data['slug']}_{image_data['size_name']}_{os.path.basename(downloaded_path)}"
+                backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
                     import shutil
