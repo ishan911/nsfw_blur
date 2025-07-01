@@ -1851,12 +1851,301 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
             'error': str(e)
         }
 
+def coupon_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False):
+    """
+    Process coupon images from a JSON URL using enhanced detection.
+    
+    Args:
+        json_url (str): URL to JSON file containing coupon image data
+        output_dir (str): Directory to save processed images
+        base_url (str): Base URL for converting relative paths to absolute URLs
+        force (bool): Force reprocessing even if output already exists
+        download_only (bool): Only download images, do not process them
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
+        
+    Returns:
+        dict: Processing summary
+    """
+    try:
+        print(f"=== Coupon Images Processing ===")
+        print(f"JSON URL: {json_url}")
+        print(f"Output directory: {output_dir}")
+        print(f"Base URL: {base_url}")
+        print(f"Force reprocessing: {force}")
+        print(f"Download only: {download_only}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
+        print()
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "coupons")
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Download JSON data
+        print("Downloading JSON data...")
+        response = requests.get(json_url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        print(f"JSON data loaded successfully")
+        
+        # Initialize detectors
+        if not download_only:
+            print("Initializing detectors...")
+            nudenet_detector = NudeNetDetector(
+                confidence_threshold=0.05,
+                pixel_size=15,
+                padding=10
+            )
+            
+            # Initialize YOLO model with error handling
+            yolo_model = None
+            if ENABLE_YOLO_DETECTION:
+                try:
+                    yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                    print("YOLO model initialized successfully")
+                except Exception as e:
+                    print(f"Warning: Could not initialize YOLO model: {e}")
+                    print("Continuing without YOLO detection...")
+                    yolo_model = None
+            else:
+                print("YOLO detection disabled in configuration")
+            
+            print("Detectors initialized successfully")
+        
+        # Process images
+        processed_count = 0
+        skipped_count = 0
+        error_count = 0
+        download_count = 0
+        
+        # Extract image URLs from JSON data
+        image_urls = []
+        
+        # Handle the coupon images JSON structure with WordPress sizes
+        if isinstance(data, list):
+            # New structure: [{"slug": "coupon_slug", "images": ["url1", "url2", ...]}, ...]
+            for item in data:
+                if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                    slug = item['slug']
+                    images_data = item['images']
+                    
+                    if isinstance(images_data, list):
+                        # Process each URL in the images array
+                        for i, url in enumerate(images_data):
+                            if url and isinstance(url, str):
+                                # Handle relative URLs with base_url
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'coupon_image',
+                                    'slug': slug,
+                                    'image_type': f'image_{i+1}',
+                                    'size_name': f'image_{i+1}'
+                                })
+                    elif isinstance(images_data, dict):
+                        # Legacy structure: {"thumbnail": "url", "medium": "url", ...}
+                        for size_name, url in images_data.items():
+                            if url and isinstance(url, str):
+                                # Handle relative URLs with base_url
+                                if base_url and not url.startswith(('http://', 'https://')):
+                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                
+                                image_urls.append({
+                                    'url': url,
+                                    'type': 'coupon_image',
+                                    'slug': slug,
+                                    'image_type': size_name,
+                                    'size_name': size_name
+                                })
+        
+        elif isinstance(data, dict):
+            # Check for nested structures
+            if 'data' in data and isinstance(data['data'], list):
+                # Structure: {"data": [{"slug": "coupon_slug", "images": ["url1", "url2", ...]}, ...]}
+                for item in data['data']:
+                    if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                        slug = item['slug']
+                        images_data = item['images']
+                        
+                        if isinstance(images_data, list):
+                            # Process each URL in the images array
+                            for i, url in enumerate(images_data):
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'coupon_image',
+                                        'slug': slug,
+                                        'image_type': f'image_{i+1}',
+                                        'size_name': f'image_{i+1}'
+                                    })
+                        elif isinstance(images_data, dict):
+                            # Legacy structure: {"thumbnail": "url", "medium": "url", ...}
+                            for size_name, url in images_data.items():
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'coupon_image',
+                                        'slug': slug,
+                                        'image_type': size_name,
+                                        'size_name': size_name
+                                    })
+            
+            elif 'coupon_images' in data and isinstance(data['coupon_images'], list):
+                # Structure: {"coupon_images": [{"slug": "coupon_slug", "images": ["url1", "url2", ...]}, ...]}
+                for item in data['coupon_images']:
+                    if isinstance(item, dict) and 'slug' in item and 'images' in item:
+                        slug = item['slug']
+                        images_data = item['images']
+                        
+                        if isinstance(images_data, list):
+                            # Process each URL in the images array
+                            for i, url in enumerate(images_data):
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'coupon_image',
+                                        'slug': slug,
+                                        'image_type': f'image_{i+1}',
+                                        'size_name': f'image_{i+1}'
+                                    })
+                        elif isinstance(images_data, dict):
+                            # Legacy structure: {"thumbnail": "url", "medium": "url", ...}
+                            for size_name, url in images_data.items():
+                                if url and isinstance(url, str):
+                                    if base_url and not url.startswith(('http://', 'https://')):
+                                        url = base_url.rstrip('/') + '/' + url.lstrip('/')
+                                    
+                                    image_urls.append({
+                                        'url': url,
+                                        'type': 'coupon_image',
+                                        'slug': slug,
+                                        'image_type': size_name,
+                                        'size_name': size_name
+                                    })
+        
+        print(f"Found {len(image_urls)} coupon image URLs to process")
+        
+        for i, image_data in enumerate(image_urls, 1):
+            try:
+                print(f"\n[{i}/{len(image_urls)}] Processing: {image_data['url']}")
+                print(f"  Coupon ID: {image_data['slug']}, Size: {image_data['size_name']}")
+                
+                # Download image
+                downloaded_path = download_image(image_data['url'])
+                if not downloaded_path:
+                    error_count += 1
+                    continue
+                
+                download_count += 1
+                
+                # Create backup of original image
+                backup_filename = os.path.basename(downloaded_path)
+                backup_path = os.path.join(backup_dir, backup_filename)
+                if not os.path.exists(backup_path):
+                    import shutil
+                    shutil.copy2(downloaded_path, backup_path)
+                    print(f"  📁 Backed up to: {backup_path}")
+                
+                if download_only:
+                    continue
+                
+                # Determine output path with WordPress structure for coupon images
+                filename = os.path.basename(downloaded_path)
+                
+                # Use original filename (preserve case and original name)
+                new_filename = filename
+                
+                # Save in wp-content/uploads/coupons
+                wp_upload_dir = os.path.join('wp-content', 'uploads', 'coupons')
+                output_path = os.path.join(wp_upload_dir, new_filename)
+                
+                # Create output directory
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                
+                # Check if already processed
+                if os.path.exists(output_path) and not force:
+                    print(f"  Skipped (already exists): {output_path}")
+                    skipped_count += 1
+                    continue
+                
+                # Process the image with enhanced detection (no resizing)
+                result = process_single_image_enhanced(
+                    downloaded_path, 
+                    output_path, 
+                    nudenet_detector, 
+                    yolo_model,
+                    image_data['image_type'],
+                    force,
+                    draw_rectangles,
+                    draw_labels
+                )
+                
+                if result['success']:
+                    processed_count += 1
+                    print(f"  Success: {output_path}")
+                    print(f"    NudeNet detections: {result['nudenet_detections']}")
+                    print(f"    YOLO detections: {result['yolo_detections']}")
+                    print(f"    WordPress files: {len(result['wordpress_files'])}")
+                else:
+                    error_count += 1
+                    print(f"  Failed: {result['message']}")
+                
+            except Exception as e:
+                error_count += 1
+                print(f"  Error processing {image_data['url']}: {e}")
+                continue
+        
+        # Summary
+        print(f"\n=== Coupon Images Processing Summary ===")
+        print(f"Total coupon images: {len(image_urls)}")
+        print(f"Downloaded: {download_count}")
+        if not download_only:
+            print(f"Processed: {processed_count}")
+            print(f"Skipped: {skipped_count}")
+        print(f"Errors: {error_count}")
+        
+        # Show database statistics
+        if not download_only:
+            db_tracker.get_processing_stats()
+        
+        return {
+            'success': True,
+            'total_images': len(image_urls),
+            'downloaded': download_count,
+            'processed': processed_count if not download_only else 0,
+            'skipped': skipped_count if not download_only else 0,
+            'errors': error_count
+        }
+        
+    except Exception as e:
+        print(f"Error in coupon_images: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
 def main():
     """
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
-    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images'], help='Command to execute')
+    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images', 'coupon-images'], help='Command to execute')
     parser.add_argument('--json-url', help='URL to JSON file containing image data (for sliding-json, category-thumbnails, and blog-images)')
     parser.add_argument('--image-path', help='Path to input image file (for sliding-single)')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
@@ -1947,6 +2236,28 @@ def main():
             return 1
             
         result = blog_images(
+            json_url=args.json_url,
+            output_dir=args.output_dir,
+            base_url=args.base_url,
+            force=args.force,
+            download_only=args.download_only,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
+        )
+        
+        if not result['success']:
+            print(f"❌ {result['error']}")
+            return 1
+        
+        print("✅ Processing completed successfully!")
+        return 0
+        
+    elif args.command == 'coupon-images':
+        if not args.json_url:
+            print("❌ --json-url is required for coupon-images command")
+            return 1
+            
+        result = coupon_images(
             json_url=args.json_url,
             output_dir=args.output_dir,
             base_url=args.base_url,
