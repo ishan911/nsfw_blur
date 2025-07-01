@@ -2157,12 +2157,201 @@ def coupon_images(json_url, output_dir="processed_images", base_url=None, force=
             'error': str(e)
         }
 
+def single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False):
+    """
+    Process a single image (file path or URL) and save in uploads folder.
+    
+    Args:
+        image_path (str): Path to input image file or URL
+        output_dir (str): Directory to save processed images
+        image_type (str): Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)
+        force (bool): Force reprocessing even if output already exists
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
+        
+    Returns:
+        dict: Processing summary
+    """
+    try:
+        print(f"=== Single Image Processing ===")
+        print(f"Input image: {image_path}")
+        print(f"Output directory: {output_dir}")
+        print(f"Image type: {image_type}")
+        print(f"Force reprocessing: {force}")
+        print(f"Draw rectangles: {draw_rectangles}")
+        print(f"Draw labels: {draw_labels}")
+        print()
+        
+        # Check if input is a URL or file path
+        is_url = image_path.startswith(('http://', 'https://'))
+        
+        if is_url:
+            print(f"  Detected URL: {image_path}")
+            # Download the image
+            downloaded_path = download_image(image_path)
+            if not downloaded_path:
+                return {
+                    'success': False,
+                    'message': f"Failed to download image from URL: {image_path}"
+                }
+            print(f"  Downloaded to: {downloaded_path}")
+            local_image_path = downloaded_path
+        else:
+            # Check if local file exists
+            if not os.path.exists(image_path):
+                return {
+                    'success': False,
+                    'message': f"Input file not found: {image_path}"
+                }
+            local_image_path = image_path
+        
+        # Create output directory
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create backup directory for original images
+        backup_dir = os.path.join(output_dir, "backup", "single")
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Initialize detectors
+        print("Initializing detectors...")
+        nudenet_detector = NudeNetDetector(
+            confidence_threshold=0.05,
+            pixel_size=15,
+            padding=10
+        )
+        
+        # Initialize YOLO model with error handling
+        yolo_model = None
+        if ENABLE_YOLO_DETECTION:
+            try:
+                yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
+                print("YOLO model initialized successfully")
+            except Exception as e:
+                print(f"Warning: Could not initialize YOLO model: {e}")
+                print("Continuing without YOLO detection...")
+                yolo_model = None
+        else:
+            print("YOLO detection disabled in configuration")
+        
+        print("Detectors initialized successfully")
+        
+        # Determine image type if not provided
+        if image_type is None:
+            # Try to infer from filename or path
+            filename = os.path.basename(local_image_path).lower()
+            if 'screenshot' in filename or 'screen' in filename:
+                image_type = 'screenshot_full_url'
+            elif 'review' in filename:
+                image_type = 'review_full_image'
+            elif 'thumb' in filename or 'category' in filename:
+                image_type = 'category_thumb'
+            else:
+                image_type = 'screenshot_full_url'  # Default
+        
+        print(f"  Detected image type: {image_type}")
+        
+        # Create backup of original image
+        backup_filename = os.path.basename(local_image_path)
+        backup_path = os.path.join(backup_dir, backup_filename)
+        if not os.path.exists(backup_path):
+            import shutil
+            shutil.copy2(local_image_path, backup_path)
+            print(f"  📁 Backed up to: {backup_path}")
+        
+        # Determine output path with uploads folder structure (same as sliding_json)
+        filename = os.path.basename(local_image_path)
+        
+        if image_type == 'review_full_image':
+            # Save in wp-content/uploads/screenshots
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+            output_path = os.path.join(wp_upload_dir, filename)
+            print(f"  Screenshots Output directory: {wp_upload_dir}")
+        else:
+            # Save in wp-content/uploads
+            wp_upload_dir = os.path.join('wp-content', 'uploads')
+            output_path = os.path.join(wp_upload_dir, filename)
+        
+        print(f"  Output directory: {wp_upload_dir}")
+        print(f"  Output path: {output_path}")
+        
+        # Create output directory structure
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Also create the screenshots folder for review_full_image type
+        if image_type == 'review_full_image':
+            screenshots_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+            os.makedirs(screenshots_dir, exist_ok=True)
+            print(f"  Created screenshots directory: {screenshots_dir}")
+        
+        # Check if already processed
+        if os.path.exists(output_path) and not force:
+            print(f"  Skipped (already exists): {output_path}")
+            return {
+                'success': True,
+                'total_images': 1,
+                'downloaded': 1 if is_url else 0,
+                'processed': 0,
+                'skipped': 1,
+                'errors': 0
+            }
+        
+        # Process the image
+        print(f"Processing image: {filename}")
+        result = process_single_image(
+            local_image_path, 
+            output_path, 
+            nudenet_detector, 
+            yolo_model,
+            image_type,
+            force,
+            draw_rectangles,
+            draw_labels
+        )
+        
+        if result['success']:
+            print(f"  Success: {output_path}")
+            print(f"    NudeNet detections: {result['nudenet_detections']}")
+            print(f"    YOLO detections: {result['yolo_detections']}")
+            print(f"    WordPress files: {len(result['wordpress_files'])}")
+            
+            # Summary
+            print(f"\n=== Processing Summary ===")
+            print(f"Total images: 1")
+            print(f"Downloaded: {1 if is_url else 0}")
+            print(f"Processed: 1")
+            print(f"Errors: 0")
+            
+            # Show database statistics
+            db_tracker.get_processing_stats()
+            
+            return {
+                'success': True,
+                'total_images': 1,
+                'downloaded': 1 if is_url else 0,
+                'processed': 1,
+                'skipped': 0,
+                'errors': 0
+            }
+        else:
+            print(f"  Failed: {result['message']}")
+            return {
+                'success': False,
+                'message': result['message']
+            }
+        
+    except Exception as e:
+        print(f"Error in single: {e}")
+        return {
+            'success': False,
+            'message': f"Error: {str(e)}"
+        }
+
 def main():
     """
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
-    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images', 'coupon-images'], help='Command to execute')
+    parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images', 'coupon-images', 'single'], help='Command to execute')
     parser.add_argument('--json-url', help='URL to JSON file containing image data (for sliding-json, category-thumbnails, and blog-images)')
     parser.add_argument('--image-path', help='Path to input image file or URL (for sliding-single)')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
@@ -2286,6 +2475,27 @@ def main():
         
         if not result['success']:
             print(f"❌ {result['error']}")
+            return 1
+        
+        print("✅ Processing completed successfully!")
+        return 0
+        
+    elif args.command == 'single':
+        if not args.image_path:
+            print("❌ --image-path is required for single command")
+            return 1
+            
+        result = single(
+            image_path=args.image_path,
+            output_dir=args.output_dir,
+            image_type=args.image_type,
+            force=args.force,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels
+        )
+        
+        if not result['success']:
+            print(f"❌ {result['message']}")
             return 1
         
         print("✅ Processing completed successfully!")
