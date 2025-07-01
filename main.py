@@ -1466,35 +1466,18 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         
         print(f"  Detected image type: {image_type}")
         
-        # Determine output path with WordPress structure
+        # Determine output path with uploads folder structure (same as sliding_json)
         filename = os.path.basename(local_image_path)
         
-        if image_type == 'review_full_image':
-            # Save in wp-content/uploads/screenshots
-            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
-            output_path = os.path.join(wp_upload_dir, filename)
-            print(f"  Screenshots Output directory: {wp_upload_dir}")
-        elif image_type == 'category_thumb':
-            # Save in wp-content/uploads/cthumbnails
-            wp_upload_dir = os.path.join('wp-content', 'uploads', 'cthumbnails')
-            output_path = os.path.join(wp_upload_dir, filename)
-            print(f"  Category thumbnails Output directory: {wp_upload_dir}")
-        else:
-            # Save in wp-content/uploads
-            wp_upload_dir = os.path.join('wp-content', 'uploads')
-            output_path = os.path.join(wp_upload_dir, filename)
-            print(f"  Output directory: {wp_upload_dir}")
+        # Save all images directly in wp-content/uploads (no subdirectories)
+        wp_upload_dir = os.path.join('wp-content', 'uploads')
+        output_path = os.path.join(wp_upload_dir, filename)
         
+        print(f"  Output directory: {wp_upload_dir}")
         print(f"  Output path: {output_path}")
         
         # Create output directory structure
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Also create the screenshots folder for review_full_image type
-        if image_type == 'review_full_image':
-            screenshots_dir = os.path.join('wp-content', 'uploads', 'screenshots')
-            os.makedirs(screenshots_dir, exist_ok=True)
-            print(f"  Created screenshots directory: {screenshots_dir}")
         
         # Check if already processed
         if os.path.exists(output_path) and not force:
@@ -2261,27 +2244,15 @@ def single(image_path, output_dir="processed_images", image_type=None, force=Fal
         # Determine output path with uploads folder structure (same as sliding_json)
         filename = os.path.basename(local_image_path)
         
-        if image_type == 'review_full_image':
-            # Save in wp-content/uploads/screenshots
-            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
-            output_path = os.path.join(wp_upload_dir, filename)
-            print(f"  Screenshots Output directory: {wp_upload_dir}")
-        else:
-            # Save in wp-content/uploads
-            wp_upload_dir = os.path.join('wp-content', 'uploads')
-            output_path = os.path.join(wp_upload_dir, filename)
+        # Save all images directly in wp-content/uploads (no subdirectories)
+        wp_upload_dir = os.path.join('wp-content', 'uploads')
+        output_path = os.path.join(wp_upload_dir, filename)
         
         print(f"  Output directory: {wp_upload_dir}")
         print(f"  Output path: {output_path}")
         
         # Create output directory structure
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Also create the screenshots folder for review_full_image type
-        if image_type == 'review_full_image':
-            screenshots_dir = os.path.join('wp-content', 'uploads', 'screenshots')
-            os.makedirs(screenshots_dir, exist_ok=True)
-            print(f"  Created screenshots directory: {screenshots_dir}")
         
         # Check if already processed
         if os.path.exists(output_path) and not force:
