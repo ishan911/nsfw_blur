@@ -1398,12 +1398,28 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         print(f"Draw labels: {draw_labels}")
         print()
         
-        # Check if input file exists
-        if not os.path.exists(image_path):
-            return {
-                'success': False,
-                'message': f"Input file not found: {image_path}"
-            }
+        # Check if input is a URL or file path
+        is_url = image_path.startswith(('http://', 'https://'))
+        
+        if is_url:
+            print(f"  Detected URL: {image_path}")
+            # Download the image
+            downloaded_path = download_image(image_path)
+            if not downloaded_path:
+                return {
+                    'success': False,
+                    'message': f"Failed to download image from URL: {image_path}"
+                }
+            print(f"  Downloaded to: {downloaded_path}")
+            local_image_path = downloaded_path
+        else:
+            # Check if local file exists
+            if not os.path.exists(image_path):
+                return {
+                    'success': False,
+                    'message': f"Input file not found: {image_path}"
+                }
+            local_image_path = image_path
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -1438,7 +1454,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         # Determine image type if not provided
         if image_type is None:
             # Try to infer from filename or path
-            filename = os.path.basename(image_path).lower()
+            filename = os.path.basename(local_image_path).lower()
             if 'screenshot' in filename or 'screen' in filename:
                 image_type = 'screenshot_full_url'
             elif 'review' in filename:
@@ -1451,7 +1467,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         print(f"  Detected image type: {image_type}")
         
         # Determine output path with WordPress structure
-        filename = os.path.basename(image_path)
+        filename = os.path.basename(local_image_path)
         
         if image_type == 'review_full_image':
             # Save in wp-content/uploads/screenshots
@@ -1486,24 +1502,24 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             return {
                 'success': True,
                 'total_images': 1,
-                'downloaded': 0,
+                'downloaded': 1 if is_url else 0,
                 'processed': 0,
                 'skipped': 1,
                 'errors': 0
             }
         
         # Create backup of original image
-        backup_filename = os.path.basename(image_path)
+        backup_filename = os.path.basename(local_image_path)
         backup_path = os.path.join(backup_dir, backup_filename)
         if not os.path.exists(backup_path):
             import shutil
-            shutil.copy2(image_path, backup_path)
+            shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
         
         # Process the image
         print(f"Processing image: {filename}")
         result = process_single_image(
-            image_path, 
+            local_image_path, 
             output_path, 
             nudenet_detector, 
             yolo_model,
@@ -1522,6 +1538,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             # Summary
             print(f"\n=== Processing Summary ===")
             print(f"Total images: 1")
+            print(f"Downloaded: {1 if is_url else 0}")
             print(f"Processed: 1")
             print(f"Errors: 0")
             
@@ -1531,7 +1548,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             return {
                 'success': True,
                 'total_images': 1,
-                'downloaded': 0,
+                'downloaded': 1 if is_url else 0,
                 'processed': 1,
                 'skipped': 0,
                 'errors': 0
@@ -2147,7 +2164,7 @@ def main():
     parser = argparse.ArgumentParser(description='Enhanced Image Processing with NudeNet and YOLO')
     parser.add_argument('command', choices=['sliding-json', 'category-thumbnails', 'sliding-single', 'blog-images', 'coupon-images'], help='Command to execute')
     parser.add_argument('--json-url', help='URL to JSON file containing image data (for sliding-json, category-thumbnails, and blog-images)')
-    parser.add_argument('--image-path', help='Path to input image file (for sliding-single)')
+    parser.add_argument('--image-path', help='Path to input image file or URL (for sliding-single)')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
     parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--base-url', help='Base URL for converting relative paths to absolute URLs')
