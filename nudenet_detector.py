@@ -23,7 +23,7 @@ class NudeNetDetector:
     - Generate various output formats
     """
     
-    def __init__(self, confidence_threshold=0.05, pixel_size=15, padding=5):
+    def __init__(self, confidence_threshold=0.05, pixel_size=15, padding=5, disable_label_filter=False):
         """
         Initialize the NudeNet detector.
         
@@ -31,6 +31,7 @@ class NudeNetDetector:
             confidence_threshold (float): Minimum confidence for detections (0.01-1.0)
             pixel_size (int): Size of pixel blocks for pixelation (5-25 recommended)
             padding (int): Extra padding around detected regions in pixels
+            disable_label_filter (bool): If True, process all detected labels instead of filtering
         """
         self.confidence_threshold = confidence_threshold
         self.pixel_size = pixel_size
@@ -56,16 +57,36 @@ class NudeNetDetector:
         }
         
         # Allowed labels for filtering
-        self.allowed_labels = set([
-            "BUTTOCKS_EXPOSED",
-            "BUTTOCKS_COVERED",
-            "FEMALE_BREAST_EXPOSED",
-            "FEMALE_GENITALIA_EXPOSED",
-            "FEMALE_GENITALIA_COVERED",
-            "ANUS_COVERED",
-            "ANUS_EXPOSED",
-            "MALE_GENITALIA_EXPOSED",
-        ])
+        if disable_label_filter:
+            # If label filtering is disabled, include all possible labels
+            self.allowed_labels = set([
+                "BUTTOCKS_EXPOSED",
+                "BUTTOCKS_COVERED",
+                "FEMALE_BREAST_EXPOSED",
+                "FEMALE_BREAST_COVERED",
+                "FEMALE_GENITALIA_EXPOSED",
+                "FEMALE_GENITALIA_COVERED",
+                "MALE_GENITALIA_EXPOSED",
+                "MALE_GENITALIA_COVERED",
+                "ANUS_COVERED",
+                "ANUS_EXPOSED",
+                "FEET_EXPOSED",
+                "FEET_COVERED",
+                "ARMPITS_EXPOSED",
+                "ARMPITS_COVERED",
+            ])
+        else:
+            # Default filtered set
+            self.allowed_labels = set([
+                "BUTTOCKS_EXPOSED",
+                "BUTTOCKS_COVERED",
+                "FEMALE_BREAST_EXPOSED",
+                "FEMALE_GENITALIA_EXPOSED",
+                "FEMALE_GENITALIA_COVERED",
+                "ANUS_COVERED",
+                "ANUS_EXPOSED",
+                "MALE_GENITALIA_EXPOSED",
+            ])
     
     def preprocess_image_for_small_parts(self, image_path, enhancement_factor=1.5):
         """
@@ -352,16 +373,17 @@ class NudeNetDetector:
                     # Filter by confidence threshold
                     filtered_detections = []
                     for detection in detections:
-                        if detection['score'] >= self.confidence_threshold:
-                            # Add preprocessing type info
-                            detection['preprocess_type'] = preprocess_type
-                            detection['image_size'] = img_size
-                            
-                            # Scale bounding boxes back to original image size if upscaled
-                            if 'upscaled' in preprocess_type:
-                                detection = self.scale_detection_to_original(detection, img_size, preprocessed_images[0][2])
-                            
-                            filtered_detections.append(detection)
+                        if(detection['class'] in self.allowed_labels):
+                            if detection['score'] >= self.confidence_threshold:
+                                # Add preprocessing type info
+                                detection['preprocess_type'] = preprocess_type
+                                detection['image_size'] = img_size
+                                
+                                # Scale bounding boxes back to original image size if upscaled
+                                if 'upscaled' in preprocess_type:
+                                    detection = self.scale_detection_to_original(detection, img_size, preprocessed_images[0][2])
+                                
+                                filtered_detections.append(detection)
                     
                     all_detections.extend(filtered_detections)
                     # print(f"    Found {len(filtered_detections)} detections")

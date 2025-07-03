@@ -1,6 +1,38 @@
 # Changelog
 
-## [Latest Update] - Blog Images JSON Format & Backup Functionality
+## [Latest Update] - Label Filtering & Sliding Method Options
+
+### New Features
+
+#### 1. Disable Label Filtering Option
+- **New `--disable-label-filter` flag** for `blog-images` command
+- **Processes all detected label types** instead of filtering to specific ones
+- **Includes additional labels** when disabled:
+  - `FEMALE_BREAST_COVERED`
+  - `MALE_GENITALIA_COVERED`
+  - `FEET_EXPOSED`, `FEET_COVERED`
+  - `ARMPITS_EXPOSED`, `ARMPITS_COVERED`
+- **Usage**: `python main.py blog-images --json-url "..." --disable-label-filter`
+
+#### 2. Disable Sliding Method Option
+- **New `--disable-sliding` flag** for `blog-images` command
+- **Uses only full image detection** instead of sliding window method
+- **Faster processing** for images that don't require detailed scanning
+- **Usage**: `python main.py blog-images --json-url "..." --disable-sliding`
+
+### Technical Improvements
+
+#### 1. Enhanced NudeNet Detector
+- **Configurable label filtering** via constructor parameter
+- **Flexible detection methods** with sliding window control
+- **Better label coverage** when filtering is disabled
+
+#### 2. Command Line Interface
+- **Additional control options** for fine-tuning detection behavior
+- **Improved help text** for new options
+- **Consistent parameter passing** throughout the processing pipeline
+
+## [Previous Update] - Blog Images JSON Format & Backup Functionality
 
 ### New Features
 

@@ -695,7 +695,7 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
             'message': f"Error: {str(e)}"
         }
 
-def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False):
+def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False):
     """
     Process a single image with enhanced detection methods.
     
@@ -708,6 +708,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         force (bool): Force reprocessing
         draw_rectangles (bool): Whether to draw rectangle borders for debugging
         draw_labels (bool): Whether to draw labels on rectangles for debugging
+        disable_sliding (bool): Whether to disable sliding window method
         
     Returns:
         dict: Processing result
@@ -728,7 +729,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         nudenet_result = nudenet_detector.process_image(
             input_path=input_path,
             output_path=output_path,
-            use_sliding_window=True,  # This will use detect_with_full_image_first
+            use_sliding_window=not disable_sliding,  # Disable sliding if requested
             draw_rectangles=draw_rectangles,
             draw_labels=draw_labels
         )
@@ -1550,7 +1551,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             'message': f"Error: {str(e)}"
         }
 
-def blog_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False, disable_yolo=False):
+def blog_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False):
     """
     Process blog images from a JSON URL using enhanced detection.
     
@@ -1563,6 +1564,8 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         draw_rectangles (bool): Whether to draw rectangle borders for debugging
         draw_labels (bool): Whether to draw labels on rectangles for debugging
         disable_yolo (bool): Disable YOLO detection for this command
+        disable_sliding (bool): Disable sliding window method for this command
+        disable_label_filter (bool): Disable label type filtering for this command
         
     Returns:
         dict: Processing summary
@@ -1576,6 +1579,8 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         print(f"Download only: {download_only}")
         print(f"Draw rectangles: {draw_rectangles}")
         print(f"Draw labels: {draw_labels}")
+        print(f"Disable sliding: {disable_sliding}")
+        print(f"Disable label filter: {disable_label_filter}")
         print()
         
         # Create output directory
@@ -1599,7 +1604,8 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
             nudenet_detector = NudeNetDetector(
                 confidence_threshold=0.05,
                 pixel_size=15,
-                padding=10
+                padding=10,
+                disable_label_filter=disable_label_filter
             )
             
             # Initialize YOLO model with error handling
@@ -1808,7 +1814,8 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                     image_data['image_type'],
                     force,
                     draw_rectangles,
-                    draw_labels
+                    draw_labels,
+                    disable_sliding
                 )
                 
                 if result['success']:
@@ -2335,6 +2342,8 @@ def main():
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if output already exists')
     parser.add_argument('--download-only', action='store_true', help='Only download images, do not process them')
     parser.add_argument('--disable-yolo', action='store_true', help='Disable YOLO detection (use only NudeNet)')
+    parser.add_argument('--disable-sliding', action='store_true', help='Disable sliding window method (use only full image detection)')
+    parser.add_argument('--disable-label-filter', action='store_true', help='Disable label type filtering (process all detected labels)')
     parser.add_argument('--draw-rectangles', action='store_true', help='Draw rectangles around detected regions for debugging')
     parser.add_argument('--draw-labels', action='store_true', help='Draw labels on rectangles (requires --draw-rectangles)')
     
@@ -2424,7 +2433,9 @@ def main():
             download_only=args.download_only,
             draw_rectangles=args.draw_rectangles,
             draw_labels=args.draw_labels,
-            disable_yolo=args.disable_yolo
+            disable_yolo=args.disable_yolo,
+            disable_sliding=args.disable_sliding,
+            disable_label_filter=args.disable_label_filter
         )
         
         if not result['success']:
