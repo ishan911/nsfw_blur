@@ -1550,7 +1550,7 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
             'message': f"Error: {str(e)}"
         }
 
-def blog_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False):
+def blog_images(json_url, output_dir="processed_images", base_url=None, force=False, download_only=False, draw_rectangles=False, draw_labels=False, disable_yolo=False):
     """
     Process blog images from a JSON URL using enhanced detection.
     
@@ -1562,6 +1562,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         download_only (bool): Only download images, do not process them
         draw_rectangles (bool): Whether to draw rectangle borders for debugging
         draw_labels (bool): Whether to draw labels on rectangles for debugging
+        disable_yolo (bool): Disable YOLO detection for this command
         
     Returns:
         dict: Processing summary
@@ -1603,7 +1604,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
             
             # Initialize YOLO model with error handling
             yolo_model = None
-            if ENABLE_YOLO_DETECTION:
+            if ENABLE_YOLO_DETECTION and not disable_yolo:
                 try:
                     yolo_model = YOLO("yolo_v8_model/runs/detect/train15/weights/best.pt")
                     print("YOLO model initialized successfully")
@@ -1612,7 +1613,10 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                     print("Continuing without YOLO detection...")
                     yolo_model = None
             else:
-                print("YOLO detection disabled in configuration")
+                if disable_yolo:
+                    print("YOLO detection disabled for blog-images command")
+                else:
+                    print("YOLO detection disabled in configuration")
             
             print("Detectors initialized successfully")
         
@@ -2419,7 +2423,8 @@ def main():
             force=args.force,
             download_only=args.download_only,
             draw_rectangles=args.draw_rectangles,
-            draw_labels=args.draw_labels
+            draw_labels=args.draw_labels,
+            disable_yolo=args.disable_yolo
         )
         
         if not result['success']:
