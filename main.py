@@ -1602,7 +1602,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
         if not download_only:
             print("Initializing detectors...")
             nudenet_detector = NudeNetDetector(
-                confidence_threshold=0.05,
+                confidence_threshold=0.3,
                 pixel_size=15,
                 padding=10,
                 disable_label_filter=disable_label_filter
