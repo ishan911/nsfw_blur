@@ -299,7 +299,7 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         print(f"Error pixelating region: {e}")
         return img
 
-def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False, save_to_folder=True, extracted_folder=None):
+def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False, save_to_folder=True, extracted_folder=None, base_folder=None):
     """
     Process a single image with enhanced detection methods.
     
@@ -315,6 +315,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         disable_sliding (bool): Whether to disable sliding window method
         save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
         extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
+        base_folder (str): Base folder to prepend to output path
         
     Returns:
         dict: Processing result
@@ -426,7 +427,8 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                 base_filename, 
                 image_type,
                 save_to_folder,
-                extracted_folder
+                extracted_folder,
+                base_folder
             )
             print(f"  Created {len(wordpress_files)} WordPress-sized images")
         
@@ -533,7 +535,7 @@ def resize_image(image, target_size, crop=False):
         
         return new_image
 
-def create_wordpress_versions(original_image_path, processed_image_path, base_filename, image_type=None, save_to_folder=True, extracted_folder=None):
+def create_wordpress_versions(original_image_path, processed_image_path, base_filename, image_type=None, save_to_folder=True, extracted_folder=None, base_folder=None):
     """
     Create WordPress-sized images from the processed image based on image type.
     
@@ -544,6 +546,7 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
         image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
         save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
         extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
+        base_folder (str): Base folder to prepend to output path
         
     Returns:
         List of created file paths
@@ -618,6 +621,10 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
             # Save in wp-content/uploads/blur
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
         
+        # Prepend base folder if provided
+        if base_folder:
+            wp_upload_dir = os.path.join(base_folder, wp_upload_dir)
+        
         # Create output directory
         os.makedirs(wp_upload_dir, exist_ok=True)
         
@@ -629,7 +636,7 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
     
     return created_files
 
-def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True):
+def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True, base_folder=None):
     """
     Process a single image (URL or file path) using enhanced detection.
     
@@ -645,6 +652,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         disable_label_filter (bool): Disable label type filtering for this command
         custom_labels (list): List of custom labels to filter for (e.g., ['FEMALE_BREAST_EXPOSED', 'BUTTOCKS_EXPOSED'])
         save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
+        base_folder (str): Base folder to prepend to output path (e.g., '/home/httpd/html/mrporngeek.com/public_html')
         
     Returns:
         dict: Processing summary
@@ -655,6 +663,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         print(f"Output directory: {output_dir}")
         print(f"Image type: {image_type}")
         print(f"Save to folder: {save_to_folder}")
+        print(f"Base folder: {base_folder}")
         print(f"Force reprocessing: {force}")
         print(f"Draw rectangles: {draw_rectangles}")
         print(f"Draw labels: {draw_labels}")
@@ -795,6 +804,11 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             # Save in wp-content/uploads/blur
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
         
+        # Prepend base folder if provided
+        if base_folder:
+            wp_upload_dir = os.path.join(base_folder, wp_upload_dir)
+            print(f"  Using base folder: {base_folder}")
+        
         output_path = os.path.join(wp_upload_dir, new_filename)
         
         print(f"  Output directory: {wp_upload_dir}")
@@ -833,7 +847,8 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             draw_labels,
             disable_sliding,
             save_to_folder,
-            extracted_folder
+            extracted_folder,
+            base_folder
         )
         
         if result['success']:
@@ -892,6 +907,7 @@ def main():
     parser.add_argument('--show-labels', action='store_true', help='Show all available NudeNet labels and exit')
     parser.add_argument('--save-to-folder', action='store_true', help='Save to wp-content/uploads/screenshots/ (default)')
     parser.add_argument('--save-to-blur', action='store_true', help='Save to wp-content/uploads/blur/ (overrides --save-to-folder)')
+    parser.add_argument('--base-folder', help='Base folder to prepend to output path (e.g., /home/httpd/html/mrporngeek.com/public_html)')
     
     args = parser.parse_args()
     
@@ -934,7 +950,8 @@ def main():
         disable_sliding=args.disable_sliding,
         disable_label_filter=args.disable_label_filter,
         custom_labels=args.custom_labels,
-        save_to_folder=save_to_folder
+        save_to_folder=save_to_folder,
+        base_folder=args.base_folder
     )
     
     if not result['success']:
