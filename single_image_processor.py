@@ -174,6 +174,38 @@ def show_available_labels():
     print("=" * 50)
     print("Usage: --custom-labels FEMALE_BREAST_EXPOSED BUTTOCKS_EXPOSED")
 
+def extract_folder_from_url(url):
+    """
+    Extract the folder path from a WordPress URL.
+    
+    Args:
+        url (str): WordPress URL (e.g., https://www.mrporngeek.com/wp-content/uploads/screenshots/image.jpg)
+        
+    Returns:
+        str: Folder path (e.g., 'screenshots', 'images', etc.) or 'screenshots' as default
+    """
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path = parsed.path
+        
+        # Look for wp-content/uploads/ in the path
+        if '/wp-content/uploads/' in path:
+            # Extract the part after wp-content/uploads/
+            parts = path.split('/wp-content/uploads/')
+            if len(parts) > 1:
+                folder_part = parts[1]
+                # Get the folder name (first part before the filename)
+                folder_parts = folder_part.split('/')
+                if len(folder_parts) > 1:
+                    return folder_parts[0]  # Return the folder name
+        
+        # Default fallback
+        return 'screenshots'
+    except Exception as e:
+        print(f"Warning: Could not extract folder from URL {url}: {e}")
+        return 'screenshots'
+
 def download_image(url, download_dir="downloads"):
     """
     Download an image from URL to local directory.
@@ -267,7 +299,7 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         print(f"Error pixelating region: {e}")
         return img
 
-def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False):
+def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False, save_to_folder=True, extracted_folder=None):
     """
     Process a single image with enhanced detection methods.
     
@@ -281,6 +313,8 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         draw_rectangles (bool): Whether to draw rectangle borders for debugging
         draw_labels (bool): Whether to draw labels on rectangles for debugging
         disable_sliding (bool): Whether to disable sliding window method
+        save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
+        extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
         
     Returns:
         dict: Processing result
@@ -379,11 +413,20 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         wordpress_files = []
         if image_type and image_type != 'category_thumb':
             base_filename = os.path.splitext(os.path.basename(output_path))[0]
+            # Extract folder from URL if it's a URL and save_to_folder is True
+            extracted_folder = None
+            if save_to_folder and extracted_folder is None:
+                # Try to extract from the original image_path if it's a URL
+                if input_path.startswith(('http://', 'https://')):
+                    extracted_folder = extract_folder_from_url(input_path)
+            
             wordpress_files = create_wordpress_versions(
                 input_path, 
                 output_path, 
                 base_filename, 
-                image_type
+                image_type,
+                save_to_folder,
+                extracted_folder
             )
             print(f"  Created {len(wordpress_files)} WordPress-sized images")
         
@@ -490,7 +533,7 @@ def resize_image(image, target_size, crop=False):
         
         return new_image
 
-def create_wordpress_versions(original_image_path, processed_image_path, base_filename, image_type=None):
+def create_wordpress_versions(original_image_path, processed_image_path, base_filename, image_type=None, save_to_folder=True, extracted_folder=None):
     """
     Create WordPress-sized images from the processed image based on image type.
     
@@ -499,6 +542,8 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
         processed_image_path (str): Path to processed image
         base_filename (str): Base filename without extension
         image_type (str): Type of image ('review_full_image', 'screenshot_full_url', etc.)
+        save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
+        extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
         
     Returns:
         List of created file paths
@@ -562,16 +607,16 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
         else:
             filename = f"{base_filename}-{width}x{height}{file_extension}"
         
-        # Determine output directory based on image type
-        if image_type == 'review_full_image':
-            # Save in wp-content/uploads/screenshots
-            wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
-        elif image_type == 'category_thumb':
-            # Save in wp-content/uploads/cthumbnails
-            wp_upload_dir = os.path.join('wp-content', 'uploads', 'cthumbnails')
+        # Determine output directory based on save_to_folder parameter and extracted folder
+        if save_to_folder:
+            # Use extracted folder if provided, otherwise default to screenshots
+            if extracted_folder:
+                wp_upload_dir = os.path.join('wp-content', 'uploads', extracted_folder)
+            else:
+                wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
         else:
-            # Save in wp-content/uploads
-            wp_upload_dir = os.path.join('wp-content', 'uploads')
+            # Save in wp-content/uploads/blur
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
         
         # Create output directory
         os.makedirs(wp_upload_dir, exist_ok=True)
@@ -584,7 +629,7 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
     
     return created_files
 
-def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None):
+def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True):
     """
     Process a single image (URL or file path) using enhanced detection.
     
@@ -599,6 +644,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         disable_sliding (bool): Disable sliding window method for this command
         disable_label_filter (bool): Disable label type filtering for this command
         custom_labels (list): List of custom labels to filter for (e.g., ['FEMALE_BREAST_EXPOSED', 'BUTTOCKS_EXPOSED'])
+        save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
         
     Returns:
         dict: Processing summary
@@ -608,6 +654,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         print(f"Input image: {image_path}")
         print(f"Output directory: {output_dir}")
         print(f"Image type: {image_type}")
+        print(f"Save to folder: {save_to_folder}")
         print(f"Force reprocessing: {force}")
         print(f"Draw rectangles: {draw_rectangles}")
         print(f"Draw labels: {draw_labels}")
@@ -728,14 +775,26 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
         
-        # Determine output path - save directly in wp-content/uploads folder
+        # Determine output path based on save_to_folder parameter and URL structure
         filename = os.path.basename(local_image_path)
         
         # Use original filename (preserve case and original name)
         new_filename = filename
         
-        # Save in wp-content/uploads
-        wp_upload_dir = os.path.join('wp-content', 'uploads')
+        # Determine output directory based on save_to_folder parameter and URL
+        if save_to_folder:
+            # Extract folder from URL if it's a URL, otherwise use default
+            if is_url:
+                extracted_folder = extract_folder_from_url(image_path)
+                wp_upload_dir = os.path.join('wp-content', 'uploads', extracted_folder)
+                print(f"  Extracted folder from URL: {extracted_folder}")
+            else:
+                # For local files, use default screenshots folder
+                wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+        else:
+            # Save in wp-content/uploads/blur
+            wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
+        
         output_path = os.path.join(wp_upload_dir, new_filename)
         
         print(f"  Output directory: {wp_upload_dir}")
@@ -758,6 +817,11 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         
         # Process the image with enhanced detection (no resizing)
         print(f"Processing image: {filename}")
+        # Extract folder from URL if it's a URL and save_to_folder is True
+        extracted_folder = None
+        if save_to_folder and is_url:
+            extracted_folder = extract_folder_from_url(image_path)
+        
         result = process_single_image_enhanced(
             local_image_path, 
             output_path, 
@@ -767,7 +831,9 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             force,
             draw_rectangles,
             draw_labels,
-            disable_sliding
+            disable_sliding,
+            save_to_folder,
+            extracted_folder
         )
         
         if result['success']:
@@ -813,7 +879,7 @@ def main():
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Standalone Single Image Processor with NudeNet and YOLO')
-    parser.add_argument('--image-path', required=True, help='Path to input image file or URL')
+    parser.add_argument('--image-path', required=False, help='Path to input image file or URL')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
     parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if output already exists')
@@ -824,6 +890,8 @@ def main():
     parser.add_argument('--draw-labels', action='store_true', help='Draw labels on rectangles (requires --draw-rectangles)')
     parser.add_argument('--custom-labels', nargs='+', help='Custom labels to filter for (e.g., FEMALE_BREAST_EXPOSED BUTTOCKS_EXPOSED)')
     parser.add_argument('--show-labels', action='store_true', help='Show all available NudeNet labels and exit')
+    parser.add_argument('--save-to-folder', action='store_true', help='Save to wp-content/uploads/screenshots/ (default)')
+    parser.add_argument('--save-to-blur', action='store_true', help='Save to wp-content/uploads/blur/ (overrides --save-to-folder)')
     
     args = parser.parse_args()
     
@@ -832,11 +900,28 @@ def main():
         show_available_labels()
         return 0
     
+    # Check if image-path is provided (required unless showing labels)
+    if not args.image_path:
+        parser.error("--image-path is required unless using --show-labels")
+    
     # Update global YOLO configuration based on command line argument
     global ENABLE_YOLO_DETECTION
     if args.disable_yolo:
         ENABLE_YOLO_DETECTION = False
         print("⚠️ YOLO detection disabled via command line argument")
+    
+    # Determine save_to_folder based on command line arguments
+    save_to_folder = True  # Default
+    if args.save_to_blur:
+        save_to_folder = False
+        print("📁 Will save to wp-content/uploads/blur/")
+    else:
+        # Extract folder from URL if it's a URL
+        if args.image_path and args.image_path.startswith(('http://', 'https://')):
+            extracted_folder = extract_folder_from_url(args.image_path)
+            print(f"📁 Will save to wp-content/uploads/{extracted_folder}/")
+        else:
+            print("📁 Will save to wp-content/uploads/screenshots/")
     
     result = single_image_processor(
         image_path=args.image_path,
@@ -848,7 +933,8 @@ def main():
         disable_yolo=args.disable_yolo,
         disable_sliding=args.disable_sliding,
         disable_label_filter=args.disable_label_filter,
-        custom_labels=args.custom_labels
+        custom_labels=args.custom_labels,
+        save_to_folder=save_to_folder
     )
     
     if not result['success']:
