@@ -201,10 +201,10 @@ def extract_folder_from_url(url):
                     return folder_parts[0]  # Return the folder name
         
         # Default fallback
-        return 'screenshots'
+        return ''
     except Exception as e:
         print(f"Warning: Could not extract folder from URL {url}: {e}")
-        return 'screenshots'
+        return ''
 
 def download_image(url, download_dir="downloads"):
     """
@@ -313,7 +313,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         draw_rectangles (bool): Whether to draw rectangle borders for debugging
         draw_labels (bool): Whether to draw labels on rectangles for debugging
         disable_sliding (bool): Whether to disable sliding window method
-        save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
+        save_to_folder (bool): If True, save to wp-content/uploads/, if False save to wp-content/uploads/blur/
         extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
         base_folder (str): Base folder to prepend to output path
         disable_resize (bool): Disable WordPress image resizing (only save the main processed image)
@@ -619,7 +619,7 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
             if extracted_folder:
                 wp_upload_dir = os.path.join('wp-content', 'uploads', extracted_folder)
             else:
-                wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+                wp_upload_dir = os.path.join('wp-content', 'uploads')
         else:
             # Save in wp-content/uploads/blur
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
@@ -804,7 +804,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
                 print(f"  Extracted folder from URL: {extracted_folder}")
             else:
                 # For local files, use default screenshots folder
-                wp_upload_dir = os.path.join('wp-content', 'uploads', 'screenshots')
+                wp_upload_dir = os.path.join('wp-content', 'uploads')
         else:
             # Save in wp-content/uploads/blur
             wp_upload_dir = os.path.join('wp-content', 'uploads', 'blur')
