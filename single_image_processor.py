@@ -895,12 +895,123 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             'message': f"Error: {str(e)}"
         }
 
+def process_multiple_images(image_paths, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True, base_folder=None, disable_resize=False):
+    """
+    Process multiple images using the single image processor.
+    
+    Args:
+        image_paths (list): List of image paths or URLs to process
+        output_dir (str): Directory to save processed images
+        image_type (str): Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)
+        force (bool): Force reprocessing even if output already exists
+        draw_rectangles (bool): Whether to draw rectangle borders for debugging
+        draw_labels (bool): Whether to draw labels on rectangles for debugging
+        disable_yolo (bool): Disable YOLO detection for this command
+        disable_sliding (bool): Disable sliding window method for this command
+        disable_label_filter (bool): Disable label type filtering for this command
+        custom_labels (list): List of custom labels to filter for (e.g., ['FEMALE_BREAST_EXPOSED', 'BUTTOCKS_EXPOSED'])
+        save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
+        base_folder (str): Base folder to prepend to output path (e.g., '/home/httpd/html/mrporngeek.com/public_html')
+        disable_resize (bool): Disable WordPress image resizing (only save the main processed image)
+        
+    Returns:
+        dict: Processing summary for all images
+    """
+    total_images = len(image_paths)
+    total_processed = 0
+    total_skipped = 0
+    total_errors = 0
+    total_downloaded = 0
+    total_nudenet_detections = 0
+    total_yolo_detections = 0
+    total_wordpress_files = 0
+    
+    print(f"=== Multiple Image Processing ===")
+    print(f"Total images to process: {total_images}")
+    print(f"Output directory: {output_dir}")
+    print(f"Image type: {image_type}")
+    print(f"Save to folder: {save_to_folder}")
+    print(f"Base folder: {base_folder}")
+    print(f"Disable resize: {disable_resize}")
+    print(f"Force reprocessing: {force}")
+    print(f"Draw rectangles: {draw_rectangles}")
+    print(f"Draw labels: {draw_labels}")
+    print(f"Disable sliding: {disable_sliding}")
+    print(f"Disable label filter: {disable_label_filter}")
+    print()
+    
+    for i, image_path in enumerate(image_paths, 1):
+        image_path = image_path.strip()  # Remove any whitespace
+        if not image_path:  # Skip empty paths
+            continue
+            
+        print(f"Processing image {i}/{total_images}: {image_path}")
+        print("-" * 60)
+        
+        try:
+            result = single_image_processor(
+                image_path=image_path,
+                output_dir=output_dir,
+                image_type=image_type,
+                force=force,
+                draw_rectangles=draw_rectangles,
+                draw_labels=draw_labels,
+                disable_yolo=disable_yolo,
+                disable_sliding=disable_sliding,
+                disable_label_filter=disable_label_filter,
+                custom_labels=custom_labels,
+                save_to_folder=save_to_folder,
+                base_folder=base_folder,
+                disable_resize=disable_resize
+            )
+            
+            if result['success']:
+                total_processed += result.get('processed', 0)
+                total_skipped += result.get('skipped', 0)
+                total_downloaded += result.get('downloaded', 0)
+                total_nudenet_detections += result.get('nudenet_detections', 0)
+                total_yolo_detections += result.get('yolo_detections', 0)
+                total_wordpress_files += len(result.get('wordpress_files', []))
+                print(f"✅ Success: {image_path}")
+            else:
+                total_errors += 1
+                print(f"❌ Failed: {image_path} - {result.get('message', 'Unknown error')}")
+                
+        except Exception as e:
+            total_errors += 1
+            print(f"❌ Error processing {image_path}: {e}")
+        
+        print()  # Add spacing between images
+    
+    # Final summary
+    print(f"=== Multiple Image Processing Summary ===")
+    print(f"Total images: {total_images}")
+    print(f"Successfully processed: {total_processed}")
+    print(f"Skipped: {total_skipped}")
+    print(f"Errors: {total_errors}")
+    print(f"Downloaded: {total_downloaded}")
+    print(f"Total NudeNet detections: {total_nudenet_detections}")
+    print(f"Total YOLO detections: {total_yolo_detections}")
+    print(f"Total WordPress files created: {total_wordpress_files}")
+    
+    return {
+        'success': total_errors == 0,
+        'total_images': total_images,
+        'processed': total_processed,
+        'skipped': total_skipped,
+        'errors': total_errors,
+        'downloaded': total_downloaded,
+        'nudenet_detections': total_nudenet_detections,
+        'yolo_detections': total_yolo_detections,
+        'wordpress_files': total_wordpress_files
+    }
+
 def main():
     """
     Main function with command-line argument parsing.
     """
     parser = argparse.ArgumentParser(description='Standalone Single Image Processor with NudeNet and YOLO')
-    parser.add_argument('--image-path', required=False, help='Path to input image file or URL')
+    parser.add_argument('--image-path', required=False, help='Path to input image file or URL (supports comma-separated multiple paths)')
     parser.add_argument('--image-type', help='Type of image (screenshot_full_url, review_full_image, category_thumb, etc.)')
     parser.add_argument('--output-dir', default='processed_images', help='Output directory for processed images')
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if output already exists')
@@ -933,37 +1044,72 @@ def main():
         ENABLE_YOLO_DETECTION = False
         print("⚠️ YOLO detection disabled via command line argument")
     
+    # Parse comma-separated image paths
+    image_paths = [path.strip() for path in args.image_path.split(',') if path.strip()]
+    
+    if not image_paths:
+        parser.error("No valid image paths provided")
+    
     # Determine save_to_folder based on command line arguments
     save_to_folder = True  # Default
     if args.save_to_blur:
         save_to_folder = False
         print("📁 Will save to wp-content/uploads/blur/")
     else:
-        # Extract folder from URL if it's a URL
-        if args.image_path and args.image_path.startswith(('http://', 'https://')):
-            extracted_folder = extract_folder_from_url(args.image_path)
-            print(f"📁 Will save to wp-content/uploads/{extracted_folder}/")
+        # For multiple images, show generic message or extract from first URL
+        if len(image_paths) == 1:
+            # Single image - extract folder from URL if it's a URL
+            if image_paths[0].startswith(('http://', 'https://')):
+                extracted_folder = extract_folder_from_url(image_paths[0])
+                print(f"📁 Will save to wp-content/uploads/{extracted_folder}/")
+            else:
+                print("📁 Will save to wp-content/uploads/screenshots/")
         else:
-            print("📁 Will save to wp-content/uploads/screenshots/")
+            # Multiple images - show generic message
+            print("📁 Will save to wp-content/uploads/ (folder extracted from each URL)")
     
-    result = single_image_processor(
-        image_path=args.image_path,
-        output_dir=args.output_dir,
-        image_type=args.image_type,
-        force=args.force,
-        draw_rectangles=args.draw_rectangles,
-        draw_labels=args.draw_labels,
-        disable_yolo=args.disable_yolo,
-        disable_sliding=args.disable_sliding,
-        disable_label_filter=args.disable_label_filter,
-        custom_labels=args.custom_labels,
-        save_to_folder=save_to_folder,
-        base_folder=args.base_folder,
-        disable_resize=args.disable_resize
-    )
+    # Process single or multiple images
+    if len(image_paths) == 1:
+        # Single image processing
+        result = single_image_processor(
+            image_path=image_paths[0],
+            output_dir=args.output_dir,
+            image_type=args.image_type,
+            force=args.force,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels,
+            disable_yolo=args.disable_yolo,
+            disable_sliding=args.disable_sliding,
+            disable_label_filter=args.disable_label_filter,
+            custom_labels=args.custom_labels,
+            save_to_folder=save_to_folder,
+            base_folder=args.base_folder,
+            disable_resize=args.disable_resize
+        )
+    else:
+        # Multiple image processing
+        result = process_multiple_images(
+            image_paths=image_paths,
+            output_dir=args.output_dir,
+            image_type=args.image_type,
+            force=args.force,
+            draw_rectangles=args.draw_rectangles,
+            draw_labels=args.draw_labels,
+            disable_yolo=args.disable_yolo,
+            disable_sliding=args.disable_sliding,
+            disable_label_filter=args.disable_label_filter,
+            custom_labels=args.custom_labels,
+            save_to_folder=save_to_folder,
+            base_folder=args.base_folder,
+            disable_resize=args.disable_resize
+        )
     
     if not result['success']:
-        print(f"❌ {result['message']}")
+        # Handle both single and multiple image processing results
+        if 'message' in result:
+            print(f"❌ {result['message']}")
+        else:
+            print(f"❌ Processing failed with {result.get('errors', 0)} errors")
         return 1
     
     print("✅ Processing completed successfully!")
