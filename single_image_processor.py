@@ -299,7 +299,7 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         print(f"Error pixelating region: {e}")
         return img
 
-def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False, save_to_folder=True, extracted_folder=None, base_folder=None):
+def process_single_image_enhanced(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_sliding=False, save_to_folder=True, extracted_folder=None, base_folder=None, disable_resize=False):
     """
     Process a single image with enhanced detection methods.
     
@@ -316,6 +316,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
         extracted_folder (str): Folder extracted from URL (e.g., 'screenshots', 'images')
         base_folder (str): Base folder to prepend to output path
+        disable_resize (bool): Disable WordPress image resizing (only save the main processed image)
         
     Returns:
         dict: Processing result
@@ -410,9 +411,9 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                 print("    Skipping YOLO detection due to error")
                 yolo_detections = []
         
-        # Create WordPress versions if image_type is specified
+        # Create WordPress versions if image_type is specified and resize is not disabled
         wordpress_files = []
-        if image_type and image_type != 'category_thumb':
+        if image_type and image_type != 'category_thumb' and not disable_resize:
             base_filename = os.path.splitext(os.path.basename(output_path))[0]
             # Extract folder from URL if it's a URL and save_to_folder is True
             extracted_folder = None
@@ -431,6 +432,8 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                 base_folder
             )
             print(f"  Created {len(wordpress_files)} WordPress-sized images")
+        elif disable_resize:
+            print(f"  Skipped WordPress resizing (disabled)")
         
         # Record in database
         db_tracker.record_processed_image(
@@ -636,7 +639,7 @@ def create_wordpress_versions(original_image_path, processed_image_path, base_fi
     
     return created_files
 
-def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True, base_folder=None):
+def single_image_processor(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_yolo=False, disable_sliding=False, disable_label_filter=False, custom_labels=None, save_to_folder=True, base_folder=None, disable_resize=False):
     """
     Process a single image (URL or file path) using enhanced detection.
     
@@ -653,6 +656,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         custom_labels (list): List of custom labels to filter for (e.g., ['FEMALE_BREAST_EXPOSED', 'BUTTOCKS_EXPOSED'])
         save_to_folder (bool): If True, save to wp-content/uploads/screenshots/, if False save to wp-content/uploads/blur/
         base_folder (str): Base folder to prepend to output path (e.g., '/home/httpd/html/mrporngeek.com/public_html')
+        disable_resize (bool): Disable WordPress image resizing (only save the main processed image)
         
     Returns:
         dict: Processing summary
@@ -664,6 +668,7 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
         print(f"Image type: {image_type}")
         print(f"Save to folder: {save_to_folder}")
         print(f"Base folder: {base_folder}")
+        print(f"Disable resize: {disable_resize}")
         print(f"Force reprocessing: {force}")
         print(f"Draw rectangles: {draw_rectangles}")
         print(f"Draw labels: {draw_labels}")
@@ -848,7 +853,8 @@ def single_image_processor(image_path, output_dir="processed_images", image_type
             disable_sliding,
             save_to_folder,
             extracted_folder,
-            base_folder
+            base_folder,
+            disable_resize
         )
         
         if result['success']:
@@ -908,6 +914,7 @@ def main():
     parser.add_argument('--save-to-folder', action='store_true', help='Save to wp-content/uploads/screenshots/ (default)')
     parser.add_argument('--save-to-blur', action='store_true', help='Save to wp-content/uploads/blur/ (overrides --save-to-folder)')
     parser.add_argument('--base-folder', help='Base folder to prepend to output path (e.g., /home/httpd/html/mrporngeek.com/public_html)')
+    parser.add_argument('--disable-resize', action='store_true', help='Disable WordPress image resizing (only save the main processed image)')
     
     args = parser.parse_args()
     
@@ -951,7 +958,8 @@ def main():
         disable_label_filter=args.disable_label_filter,
         custom_labels=args.custom_labels,
         save_to_folder=save_to_folder,
-        base_folder=args.base_folder
+        base_folder=args.base_folder,
+        disable_resize=args.disable_resize
     )
     
     if not result['success']:
@@ -962,4 +970,5 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    exit(main()) 
+    import sys
+    sys.exit(main()) 
