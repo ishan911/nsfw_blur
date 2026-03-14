@@ -12,3 +12,5 @@ processed_windows
 backups
 .venv
 **/__pycache__
+docs
+specs
