@@ -357,7 +357,7 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         else:
             try:
                 # Run YOLO detection with better error handling
-                yolo_results = yolo_model(output_path, verbose=False)
+                yolo_results = yolo_model(input_path, verbose=False)
                 
                 # Handle YOLO results properly with error checking
                 if isinstance(yolo_results, list) and len(yolo_results) > 0:
@@ -371,12 +371,16 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                             for box in boxes:
                                 try:
                                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                                    confidence = box.conf[0].cpu().numpy()
+                                    confidence = float(box.conf[0].cpu().numpy())
                                     class_id = int(box.cls[0].cpu().numpy())
-                                    
+
+                                    # Filter by confidence threshold
+                                    if confidence < 0.3:
+                                        continue
+
                                     yolo_detections.append({
                                         'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
-                                        'score': float(confidence),
+                                        'score': confidence,
                                         'class': f'yolo_class_{class_id}'
                                     })
                                 except Exception as box_error:
@@ -390,9 +394,8 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
                                     try:
                                         x1, y1, w, h = detection['box']
                                         x2, y2 = x1 + w, y1 + h
-                                        roi = img[y1:y2, x1:x2]
-                                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
-                                        img[y1:y2, x1:x2] = roi_blur
+                                        # Use pixelation for consistency with NudeNet regions
+                                        img = pixelate_region_cv(img, x1, y1, x2, y2, nudenet_detector.pixel_size)
                                     except Exception as blur_error:
                                         print(f"    Error applying blur to detection: {blur_error}")
                                         continue
@@ -416,7 +419,6 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         if image_type and image_type != 'category_thumb' and not disable_resize:
             base_filename = os.path.splitext(os.path.basename(output_path))[0]
             # Extract folder from URL if it's a URL and save_to_folder is True
-            extracted_folder = None
             if save_to_folder and extracted_folder is None:
                 # Try to extract from the original image_path if it's a URL
                 if input_path.startswith(('http://', 'https://')):

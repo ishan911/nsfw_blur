@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
 import os
+import tempfile
 from nudenet import NudeDetector
 
 class NudeNetDetector:
@@ -103,73 +104,45 @@ class NudeNetDetector:
             # Load image with PIL for better enhancement control
             pil_image = Image.open(image_path)
             original_size = pil_image.size
-            
+
             preprocessed_images = []
-            
-            # Original image
+
+            # 1. Original image
             preprocessed_images.append(('original', cv2.imread(image_path), original_size))
-            
-            # Upscaled versions for small part detection
-            scale_factors = [1.5, 2.0, 2.5, 3.0]  # Different upscaling factors
-            
-            for scale in scale_factors:
-                # Calculate new size
-                new_width = int(original_size[0] * scale)
-                new_height = int(original_size[1] * scale)
-                new_size = (new_width, new_height)
-                
-                # Upscale image
-                upscaled = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-                upscaled_cv = cv2.cvtColor(np.array(upscaled), cv2.COLOR_RGB2BGR)
-                preprocessed_images.append((f'upscaled_{scale}x', upscaled_cv, new_size))
-                
-                # Upscaled + enhanced versions
-                enhancer = ImageEnhance.Brightness(upscaled)
-                brightened = enhancer.enhance(enhancement_factor)
-                enhancer = ImageEnhance.Contrast(brightened)
-                enhanced = enhancer.enhance(enhancement_factor)
-                enhanced_cv = cv2.cvtColor(np.array(enhanced), cv2.COLOR_RGB2BGR)
-                preprocessed_images.append((f'upscaled_{scale}x_enhanced', enhanced_cv, new_size))
-            
-            # Add the original enhanced versions
-            # Brightness enhancement
+
+            # 2. Upscaled 2.0x for small part detection
+            scale = 2.0
+            new_width = int(original_size[0] * scale)
+            new_height = int(original_size[1] * scale)
+            new_size = (new_width, new_height)
+            upscaled = pil_image.resize(new_size, Image.Resampling.LANCZOS)
+            upscaled_cv = cv2.cvtColor(np.array(upscaled), cv2.COLOR_RGB2BGR)
+            preprocessed_images.append(('upscaled_2.0x', upscaled_cv, new_size))
+
+            # 3. Upscaled 2.0x + enhanced
+            enhancer = ImageEnhance.Brightness(upscaled)
+            brightened = enhancer.enhance(enhancement_factor)
+            enhancer = ImageEnhance.Contrast(brightened)
+            enhanced = enhancer.enhance(enhancement_factor)
+            enhanced_cv = cv2.cvtColor(np.array(enhanced), cv2.COLOR_RGB2BGR)
+            preprocessed_images.append(('upscaled_2.0x_enhanced', enhanced_cv, new_size))
+
+            # 4. Brightened original
             enhancer = ImageEnhance.Brightness(pil_image)
             brightened = enhancer.enhance(enhancement_factor)
             brightened_cv = cv2.cvtColor(np.array(brightened), cv2.COLOR_RGB2BGR)
             preprocessed_images.append(('brightened', brightened_cv, original_size))
-            
-            # Contrast enhancement
-            enhancer = ImageEnhance.Contrast(pil_image)
-            contrasted = enhancer.enhance(enhancement_factor)
-            contrasted_cv = cv2.cvtColor(np.array(contrasted), cv2.COLOR_RGB2BGR)
-            preprocessed_images.append(('contrasted', contrasted_cv, original_size))
-            
-            # Combined brightness and contrast
-            enhancer = ImageEnhance.Brightness(pil_image)
-            brightened = enhancer.enhance(enhancement_factor)
-            enhancer = ImageEnhance.Contrast(brightened)
-            combined = enhancer.enhance(enhancement_factor)
-            combined_cv = cv2.cvtColor(np.array(combined), cv2.COLOR_RGB2BGR)
-            preprocessed_images.append(('combined', combined_cv, original_size))
-            
-            # Gamma correction for darker images
-            gamma = 0.7  # Brighten dark areas
-            pil_array = np.array(pil_image)
-            gamma_corrected = np.power(pil_array / 255.0, gamma) * 255.0
-            gamma_corrected = gamma_corrected.astype(np.uint8)
-            gamma_cv = cv2.cvtColor(gamma_corrected, cv2.COLOR_RGB2BGR)
-            preprocessed_images.append(('gamma_corrected', gamma_cv, original_size))
-            
-            # Histogram equalization
+
+            # 5. CLAHE histogram equalization (best single enhancement for detection)
             img_cv = cv2.imread(image_path)
             lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
             l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
             l = clahe.apply(l)
-            lab = cv2.merge((l,a,b))
+            lab = cv2.merge((l, a, b))
             hist_eq = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
             preprocessed_images.append(('histogram_equalized', hist_eq, original_size))
-            
+
             return preprocessed_images
             
         except Exception as e:
@@ -234,15 +207,13 @@ class NudeNetDetector:
         
         for detection in sorted_detections:
             is_duplicate = False
-            
+
             for unique_detection in unique_detections:
-                # Check if same class
-                if detection['class'] == unique_detection['class']:
-                    # Calculate IoU
-                    iou = self.calculate_iou(detection['box'], unique_detection['box'])
-                    if iou > iou_threshold:
-                        is_duplicate = True
-                        break
+                # Cross-class NMS: deduplicate overlapping regions regardless of class
+                iou = self.calculate_iou(detection['box'], unique_detection['box'])
+                if iou > iou_threshold:
+                    is_duplicate = True
+                    break
             
             if not is_duplicate:
                 unique_detections.append(detection)
@@ -362,8 +333,9 @@ class NudeNetDetector:
             for i, (preprocess_type, img, img_size) in enumerate(preprocessed_images):
                 # print(f"  Processing {preprocess_type} version (size: {img_size})...")
                 
-                # Save temporary image for NudeNet
-                temp_path = f"temp_{preprocess_type}.jpg"
+                # Save temporary image for NudeNet (using tempfile for safe parallel processing)
+                temp_fd, temp_path = tempfile.mkstemp(suffix=f'_{preprocess_type}.jpg')
+                os.close(temp_fd)
                 cv2.imwrite(temp_path, img)
                 
                 try:
@@ -424,9 +396,9 @@ class NudeNetDetector:
             # Filter by confidence threshold
             filtered_detections = []
             for detection in detections:
-                if detection['score'] >= self.confidence_threshold:
+                if detection['score'] >= self.confidence_threshold and detection['class'] in self.allowed_labels:
                     filtered_detections.append(detection)
-            
+
             return filtered_detections
             
         except Exception as e:
@@ -476,12 +448,13 @@ class NudeNetDetector:
         print(f"Image size: {w}x{h}")
         
         for x, y, window in self.sliding_window(img, step_size, window_size):
-            # Save temp window for processing
-            temp_window_path = f"temp_window_{y}_{x}.jpg"
+            # Save temp window for processing (using tempfile for safe parallel processing)
+            temp_fd, temp_window_path = tempfile.mkstemp(suffix=f'_window_{y}_{x}.jpg')
+            os.close(temp_fd)
             cv2.imwrite(temp_window_path, window)
             
-            # Run enhanced detection on the window
-            detections = self.detect_enhanced(temp_window_path, enhancement_factor)
+            # Run simple detection on the window (enhanced is used for full-image pass)
+            detections = self.detect_simple(temp_window_path)
             
             # Filter for allowed labels
             filtered = [d for d in detections if d['class'] in self.allowed_labels]
@@ -590,11 +563,15 @@ class NudeNetDetector:
                         print(f"Warning: Invalid rectangle for detection {i}: ({x1},{y1}) to ({x2},{y2})")
                         continue
                     
-                    # Add padding to the detected rectangle
-                    x1_padded = max(0, x1 - self.padding)
-                    y1_padded = max(0, y1 - self.padding)
-                    x2_padded = min(width, x2 + self.padding)
-                    y2_padded = min(height, y2 + self.padding)
+                    # Add proportional padding to the detected rectangle
+                    detection_width = x2 - x1
+                    detection_height = y2 - y1
+                    pad_x = max(self.padding, int(detection_width * 0.1))
+                    pad_y = max(self.padding, int(detection_height * 0.1))
+                    x1_padded = max(0, x1 - pad_x)
+                    y1_padded = max(0, y1 - pad_y)
+                    x2_padded = min(width, x2 + pad_x)
+                    y2_padded = min(height, y2 + pad_y)
                     
                     # Pixelate the detected region (using padded coordinates)
                     img = self.pixelate_region(img, x1_padded, y1_padded, x2_padded, y2_padded, self.pixel_size)
@@ -705,11 +682,13 @@ class NudeNetDetector:
                 detections = self.detect_enhanced(input_path)
             
             if not detections:
-                print("No detections found.")
+                print("No detections found (image is clean).")
+                import shutil
+                shutil.copy2(input_path, output_path)
                 return {
-                    'success': False,
+                    'success': True,
                     'detection_count': 0,
-                    'message': 'No detections found'
+                    'message': 'No NSFW content detected'
                 }
             
             # Pixelate the image
