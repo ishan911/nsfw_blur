@@ -9,6 +9,7 @@ import os
 import sys
 import argparse
 import json
+import shutil
 import requests
 import hashlib
 from datetime import datetime
@@ -1034,7 +1035,6 @@ def sliding_json(json_url, output_dir="processed_images", base_url=None, force=F
                 backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
-                    import shutil
                     shutil.copy2(downloaded_path, backup_path)
                     print(f"  📁 Backed up to: {backup_path}")
                 
@@ -1279,7 +1279,6 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
                 backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
-                    import shutil
                     shutil.copy2(downloaded_path, backup_path)
                     print(f"  📁 Backed up to: {backup_path}")
                 
@@ -1480,7 +1479,6 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         backup_filename = os.path.basename(local_image_path)
         backup_path = os.path.join(backup_dir, backup_filename)
         if not os.path.exists(backup_path):
-            import shutil
             shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
         
@@ -1657,21 +1655,7 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                                     'image_type': size_name,
                                     'size_name': size_name
                                 })
-                    elif isinstance(images_data, list):
-                        # New structure: ["url1", "url2", ...]
-                        for i, url in enumerate(images_data):
-                            if url and isinstance(url, str):
-                                if base_url and not url.startswith(('http://', 'https://')):
-                                    url = base_url.rstrip('/') + '/' + url.lstrip('/')
-                                
-                                image_urls.append({
-                                    'url': url,
-                                    'type': 'blog_image',
-                                    'slug': slug,
-                                    'image_type': f'image_{i+1}',
-                                    'size_name': f'image_{i+1}'
-                                })
-        
+
         elif isinstance(data, dict):
             # Check for nested structures
             if 'data' in data and isinstance(data['data'], list):
@@ -1763,7 +1747,6 @@ def blog_images(json_url, output_dir="processed_images", base_url=None, force=Fa
                 backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
-                    import shutil
                     shutil.copy2(downloaded_path, backup_path)
                     print(f"  📁 Backed up to: {backup_path}")
                 
@@ -2053,7 +2036,6 @@ def coupon_images(json_url, output_dir="processed_images", base_url=None, force=
                 backup_filename = os.path.basename(downloaded_path)
                 backup_path = os.path.join(backup_dir, backup_filename)
                 if not os.path.exists(backup_path):
-                    import shutil
                     shutil.copy2(downloaded_path, backup_path)
                     print(f"  📁 Backed up to: {backup_path}")
                 
@@ -2241,7 +2223,6 @@ def single_image(image_path, output_dir="processed_images", image_type=None, for
         backup_filename = os.path.basename(local_image_path)
         backup_path = os.path.join(backup_dir, backup_filename)
         if not os.path.exists(backup_path):
-            import shutil
             shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
         
@@ -2422,7 +2403,6 @@ def single(image_path, output_dir="processed_images", image_type=None, force=Fal
         backup_filename = os.path.basename(local_image_path)
         backup_path = os.path.join(backup_dir, backup_filename)
         if not os.path.exists(backup_path):
-            import shutil
             shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
         

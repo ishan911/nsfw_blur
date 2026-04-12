@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
 import os
+import shutil
 import tempfile
 from nudenet import NudeDetector
 
@@ -683,7 +684,6 @@ class NudeNetDetector:
             
             if not detections:
                 print("No detections found (image is clean).")
-                import shutil
                 shutil.copy2(input_path, output_path)
                 return {
                     'success': True,
