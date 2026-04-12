@@ -540,6 +540,80 @@ def pixelate_region_cv(img, x1, y1, x2, y2, pixel_size):
         print(f"Error pixelating region: {e}")
         return img
 
+def _apply_yolo_detection(input_path, output_path, yolo_model):
+    """
+    Run YOLO detection on input_path and apply Gaussian blur to detected
+    regions in output_path.
+
+    Detects on the ORIGINAL image (input_path) so YOLO never sees
+    NudeNet's pixelation artefacts. The blur is written to output_path.
+
+    Args:
+        input_path (str): Path to the original, unmodified image.
+        output_path (str): Path to the image that will receive the blur.
+        yolo_model: Ultralytics YOLO instance, or None.
+
+    Returns:
+        list[dict]: Each dict has keys 'box' ([x,y,w,h]), 'score', 'class'.
+    """
+    if yolo_model is None:
+        print("    YOLO model not available, skipping YOLO detection")
+        return []
+
+    yolo_detections = []
+    try:
+        yolo_results = yolo_model(input_path, verbose=False)
+
+        if not (isinstance(yolo_results, list) and len(yolo_results) > 0):
+            print("    No YOLO detections found")
+            return []
+
+        result = yolo_results[0]
+        if not (hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0):
+            print("    No YOLO detections found")
+            return []
+
+        boxes = result.boxes
+        print(f"    Found {len(boxes)} YOLO detections")
+
+        for box in boxes:
+            try:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                confidence = float(box.conf[0].cpu().numpy())
+                class_id = int(box.cls[0].cpu().numpy())
+                class_name = result.names[class_id]
+
+                yolo_detections.append({
+                    'box': [int(x1), int(y1), int(x2 - x1), int(y2 - y1)],
+                    'score': confidence,
+                    'class': class_name,
+                })
+            except Exception as box_error:
+                print(f"    Error processing YOLO box: {box_error}")
+                continue
+
+        if yolo_detections:
+            img = cv2.imread(output_path)
+            for detection in yolo_detections:
+                try:
+                    x1, y1, w, h = detection['box']
+                    x2, y2 = x1 + w, y1 + h
+                    roi = img[y1:y2, x1:x2]
+                    if roi.size > 0:
+                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
+                        img[y1:y2, x1:x2] = roi_blur
+                except Exception as blur_error:
+                    print(f"    Error applying blur to detection: {blur_error}")
+                    continue
+            cv2.imwrite(output_path, img)
+            print(f"    Applied YOLO blurring to {len(yolo_detections)} regions")
+
+    except Exception as e:
+        print(f"    Error in YOLO detection: {e}")
+
+    return yolo_detections
+
+
 def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False):
     """
     Process a single image with both NudeNet and YOLO detection.
@@ -595,67 +669,12 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
         
         # Step 2: YOLO detection and blurring
         print("  Running YOLO detection...")
-        yolo_detections = []
-        
-        if not ENABLE_YOLO_DETECTION:
-            print("    YOLO detection disabled in configuration")
+        if ENABLE_YOLO_DETECTION:
+            yolo_detections = _apply_yolo_detection(input_path, output_path, yolo_model)
         else:
-            try:
-                # Run YOLO detection with better error handling
-                yolo_results = yolo_model(output_path, verbose=False)
-                
-                # Handle YOLO results properly with error checking
-                if isinstance(yolo_results, list) and len(yolo_results) > 0:
-                    result = yolo_results[0]  # Get first result
-                    if hasattr(result, 'boxes') and result.boxes is not None:
-                        boxes = result.boxes
-                        if len(boxes) > 0:
-                            print(f"    Found {len(boxes)} YOLO detections")
-                            
-                            # Convert boxes to detection format
-                            for box in boxes:
-                                try:
-                                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                                    confidence = box.conf[0].cpu().numpy()
-                                    class_id = int(box.cls[0].cpu().numpy())
-                                    
-                                    yolo_detections.append({
-                                        'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
-                                        'score': float(confidence),
-                                        'class': f'yolo_class_{class_id}'
-                                    })
-                                except Exception as box_error:
-                                    print(f"    Error processing YOLO box: {box_error}")
-                                    continue
-                            
-                            # Apply additional YOLO blurring if needed
-                            if yolo_detections:
-                                img = cv2.imread(output_path)
-                                for detection in yolo_detections:
-                                    try:
-                                        x1, y1, w, h = detection['box']
-                                        x2, y2 = x1 + w, y1 + h
-                                        roi = img[y1:y2, x1:x2]
-                                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
-                                        img[y1:y2, x1:x2] = roi_blur
-                                    except Exception as blur_error:
-                                        print(f"    Error applying blur to detection: {blur_error}")
-                                        continue
-                                
-                                cv2.imwrite(output_path, img)
-                                print(f"    Applied YOLO blurring to {len(yolo_detections)} regions")
-                        else:
-                            print("    No YOLO detections found")
-                    else:
-                        print("    No YOLO detections found")
-                else:
-                    print("    No YOLO detections found")
-                
-            except Exception as e:
-                print(f"    Error in YOLO detection: {e}")
-                print("    Skipping YOLO detection due to error")
-                yolo_detections = []
-        
+            print("    YOLO detection disabled in configuration")
+            yolo_detections = []
+
         # Step 3: Create WordPress versions
         print("  Creating WordPress versions...")
         base_filename = os.path.splitext(os.path.basename(output_path))[0]
@@ -740,69 +759,14 @@ def process_single_image_enhanced(input_path, output_path, nudenet_detector, yol
         
         print(f"  Enhanced detections: {nudenet_result['detection_count']}")
         
-        # Run YOLO detection on the processed image
-        print(f"  Running YOLO detection...")
-        yolo_detections = []
-        
-        if not ENABLE_YOLO_DETECTION:
-            print("    YOLO detection disabled in configuration")
+        # Run YOLO detection and blurring
+        print("  Running YOLO detection...")
+        if ENABLE_YOLO_DETECTION:
+            yolo_detections = _apply_yolo_detection(input_path, output_path, yolo_model)
         else:
-            try:
-                # Run YOLO detection with better error handling
-                yolo_results = yolo_model(output_path, verbose=False)
-                
-                # Handle YOLO results properly with error checking
-                if isinstance(yolo_results, list) and len(yolo_results) > 0:
-                    result = yolo_results[0]  # Get first result
-                    if hasattr(result, 'boxes') and result.boxes is not None:
-                        boxes = result.boxes
-                        if len(boxes) > 0:
-                            print(f"    Found {len(boxes)} YOLO detections")
-                            
-                            # Convert boxes to detection format
-                            for box in boxes:
-                                try:
-                                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                                    confidence = box.conf[0].cpu().numpy()
-                                    class_id = int(box.cls[0].cpu().numpy())
-                                    
-                                    yolo_detections.append({
-                                        'box': [int(x1), int(y1), int(x2-x1), int(y2-y1)],
-                                        'score': float(confidence),
-                                        'class': f'yolo_class_{class_id}'
-                                    })
-                                except Exception as box_error:
-                                    print(f"    Error processing YOLO box: {box_error}")
-                                    continue
-                            
-                            # Apply additional YOLO blurring if needed
-                            if yolo_detections:
-                                img = cv2.imread(output_path)
-                                for detection in yolo_detections:
-                                    try:
-                                        x1, y1, w, h = detection['box']
-                                        x2, y2 = x1 + w, y1 + h
-                                        roi = img[y1:y2, x1:x2]
-                                        roi_blur = cv2.GaussianBlur(roi, (51, 51), 0)
-                                        img[y1:y2, x1:x2] = roi_blur
-                                    except Exception as blur_error:
-                                        print(f"    Error applying blur to detection: {blur_error}")
-                                        continue
-                                
-                                cv2.imwrite(output_path, img)
-                                print(f"    Applied YOLO blurring to {len(yolo_detections)} regions")
-                        else:
-                            print("    No YOLO detections found")
-                    else:
-                        print("    No YOLO detections found")
-                else:
-                    print("    No YOLO detections found")
-                
-            except Exception as e:
-                print(f"    Error in YOLO detection: {e}")
-                print("    Skipping YOLO detection due to error")
-                yolo_detections = []
-        
+            print("    YOLO detection disabled in configuration")
+            yolo_detections = []
+
         # Create WordPress versions if image_type is specified
         wordpress_files = []
         if image_type and image_type != 'category_thumb':
