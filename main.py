@@ -635,7 +635,7 @@ def _apply_yolo_detection(input_path, output_path, yolo_model):
     return yolo_detections
 
 
-def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False):
+def process_single_image(input_path, output_path, nudenet_detector, yolo_model, image_type=None, force=False, draw_rectangles=False, draw_labels=False, disable_wp_sizes=False):
     """
     Process a single image with both NudeNet and YOLO detection.
     
@@ -696,16 +696,20 @@ def process_single_image(input_path, output_path, nudenet_detector, yolo_model, 
             print("    YOLO detection disabled in configuration")
             yolo_detections = []
 
-        # Step 3: Create WordPress versions
-        print("  Creating WordPress versions...")
-        base_filename = os.path.splitext(os.path.basename(output_path))[0]
-        created_files = create_wordpress_versions(
-            input_path, 
-            output_path, 
-            base_filename, 
-            image_type
-        )
-        print(f"  Created {len(created_files)} WordPress-sized images")
+        # Step 3: Create WordPress versions (skipped when processing in-place per-file)
+        if disable_wp_sizes:
+            print("  Skipping WordPress size generation (inplace mode)")
+            created_files = []
+        else:
+            print("  Creating WordPress versions...")
+            base_filename = os.path.splitext(os.path.basename(output_path))[0]
+            created_files = create_wordpress_versions(
+                input_path,
+                output_path,
+                base_filename,
+                image_type
+            )
+            print(f"  Created {len(created_files)} WordPress-sized images")
         
         # Step 4: Record in database
         db_tracker.record_processed_image(
@@ -1357,7 +1361,7 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
             'message': f"Error: {str(e)}"
         }
 
-def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, base_folder=None):
+def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, base_folder=None, inplace=False):
     """
     Process a single image using sliding window detection.
     
@@ -1454,17 +1458,19 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         
         print(f"  Detected image type: {image_type}")
 
-        # Determine output path with uploads folder structure (same as sliding_json)
+        # Determine output path
         filename = os.path.basename(local_image_path)
 
-        # Save all images directly in wp-content/uploads (no subdirectories)
-        if base_folder:
+        if inplace:
+            # Overwrite the input file directly — plugin passes each size individually
+            output_path = local_image_path
+        elif base_folder:
             wp_upload_dir = os.path.join(base_folder, 'wp-content', 'uploads')
+            output_path = os.path.join(wp_upload_dir, filename)
         else:
             wp_upload_dir = os.path.join('wp-content', 'uploads')
-        output_path = os.path.join(wp_upload_dir, filename)
+            output_path = os.path.join(wp_upload_dir, filename)
 
-        print(f"  Output directory: {wp_upload_dir}")
         print(f"  Output path: {output_path}")
         
         # Create output directory structure
@@ -1488,18 +1494,19 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         if not os.path.exists(backup_path):
             shutil.copy2(local_image_path, backup_path)
             print(f"  📁 Backed up to: {backup_path}")
-        
+
         # Process the image
         print(f"Processing image: {filename}")
         result = process_single_image(
-            local_image_path, 
-            output_path, 
-            nudenet_detector, 
+            local_image_path,
+            output_path,
+            nudenet_detector,
             yolo_model,
             image_type,
             force,
             draw_rectangles,
-            draw_labels
+            draw_labels,
+            disable_wp_sizes=inplace,
         )
         
         if result['success']:
@@ -2508,6 +2515,7 @@ def main():
     parser.add_argument('--draw-rectangles', action='store_true', help='Draw rectangles around detected regions for debugging')
     parser.add_argument('--draw-labels', action='store_true', help='Draw labels on rectangles (requires --draw-rectangles)')
     parser.add_argument('--base-folder', help='Absolute path to WordPress root directory (used to construct wp-content/uploads output path)')
+    parser.add_argument('--inplace', action='store_true', help='Overwrite the input file with the blurred result (plugin passes each size individually)')
     
     args = parser.parse_args()
     
@@ -2574,6 +2582,7 @@ def main():
             draw_rectangles=args.draw_rectangles,
             draw_labels=args.draw_labels,
             base_folder=args.base_folder,
+            inplace=args.inplace,
         )
         
         if not result['success']:
