@@ -394,36 +394,53 @@ def create_wordpress_sizes_with_pixelation(original_image_path, detections, base
         # First, resize the original image
         resized_image = resize_image(original_image, (width, height), crop)
         
-        # Calculate scale factors for detection coordinates
+        # Calculate scale factors and canvas offsets for detection coordinates.
+        # These mirror the logic in resize_image() so boxes land on the actual content.
+        image_ratio = original_width / original_height
+        target_ratio = width / height
+
         if crop:
-            # For cropped images, calculate the scale factor based on the resize operation
-            scale_x = width / original_width
-            scale_y = height / original_height
-            scale_factor = max(scale_x, scale_y)  # Use the larger scale factor for cropping
+            scale_factor = max(width / original_width, height / original_height)
+            # Intermediate dimensions before the centre-crop
+            if image_ratio > target_ratio:
+                new_w = int(original_width * (height / original_height))
+                new_h = height
+            else:
+                new_w = width
+                new_h = int(original_height * (width / original_width))
+            # Crop removes this many pixels from the top-left corner
+            offset_x = -((new_w - width) // 2)
+            offset_y = -((new_h - height) // 2)
         else:
-            # For non-cropped images, calculate scale factor
-            scale_x = width / original_width
-            scale_y = height / original_height
-            scale_factor = min(scale_x, scale_y)  # Use the smaller scale factor to fit within bounds
-        
-        # Scale detection coordinates to the resized image
+            scale_factor = min(width / original_width, height / original_height)
+            # Intermediate dimensions before padding
+            if image_ratio > target_ratio:
+                new_w = width
+                new_h = int(width / image_ratio)
+            else:
+                new_h = height
+                new_w = int(height * image_ratio)
+            # Padding adds this many pixels from the top-left corner
+            offset_x = (width - new_w) // 2
+            offset_y = (height - new_h) // 2
+
+        # Scale detection coordinates to the resized canvas
         scaled_detections = []
         for detection in detections:
-            if detection['score'] > 0.1:  # Apply confidence threshold
+            if detection['score'] > 0.1:
                 x, y, w, h = detection['box']
-                
-                # Scale coordinates to the resized image
-                scaled_x = int(x * scale_factor)
-                scaled_y = int(y * scale_factor)
+
+                scaled_x = int(x * scale_factor) + offset_x
+                scaled_y = int(y * scale_factor) + offset_y
                 scaled_w = int(w * scale_factor)
                 scaled_h = int(h * scale_factor)
-                
-                # Ensure coordinates are within bounds
+
+                # Clamp to canvas bounds
                 scaled_x = max(0, min(scaled_x, width - 1))
                 scaled_y = max(0, min(scaled_y, height - 1))
                 scaled_w = max(1, min(scaled_w, width - scaled_x))
                 scaled_h = max(1, min(scaled_h, height - scaled_y))
-                
+
                 scaled_detections.append({
                     'box': [scaled_x, scaled_y, scaled_w, scaled_h],
                     'score': detection['score'],
