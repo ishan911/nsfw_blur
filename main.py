@@ -1357,7 +1357,7 @@ def category_thumbnails(json_url, output_dir="processed_images", base_url=None, 
             'message': f"Error: {str(e)}"
         }
 
-def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False):
+def sliding_single(image_path, output_dir="processed_images", image_type=None, force=False, draw_rectangles=False, draw_labels=False, base_folder=None):
     """
     Process a single image using sliding window detection.
     
@@ -1376,15 +1376,16 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         print(f"=== Sliding Single Image Processing ===")
         print(f"Input image: {image_path}")
         print(f"Output directory: {output_dir}")
+        print(f"Base folder: {base_folder}")
         print(f"Image type: {image_type}")
         print(f"Force reprocessing: {force}")
         print(f"Draw rectangles: {draw_rectangles}")
         print(f"Draw labels: {draw_labels}")
         print()
-        
+
         # Check if input is a URL or file path
         is_url = image_path.startswith(('http://', 'https://'))
-        
+
         if is_url:
             print(f"  Detected URL: {image_path}")
             # Download the image
@@ -1404,12 +1405,15 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
                     'message': f"Input file not found: {image_path}"
                 }
             local_image_path = image_path
-        
+
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Create backup directory for original images
-        backup_dir = os.path.join(output_dir, "backup", "single")
+        if base_folder:
+            backup_dir = os.path.join(base_folder, 'wp-content', 'uploads', 'backup', 'single')
+        else:
+            backup_dir = os.path.join(output_dir, "backup", "single")
         os.makedirs(backup_dir, exist_ok=True)
         
         # Initialize detectors
@@ -1449,14 +1453,17 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
                 image_type = 'screenshot_full_url'  # Default
         
         print(f"  Detected image type: {image_type}")
-        
+
         # Determine output path with uploads folder structure (same as sliding_json)
         filename = os.path.basename(local_image_path)
-        
+
         # Save all images directly in wp-content/uploads (no subdirectories)
-        wp_upload_dir = os.path.join('wp-content', 'uploads')
+        if base_folder:
+            wp_upload_dir = os.path.join(base_folder, 'wp-content', 'uploads')
+        else:
+            wp_upload_dir = os.path.join('wp-content', 'uploads')
         output_path = os.path.join(wp_upload_dir, filename)
-        
+
         print(f"  Output directory: {wp_upload_dir}")
         print(f"  Output path: {output_path}")
         
@@ -2500,6 +2507,7 @@ def main():
     parser.add_argument('--disable-label-filter', action='store_true', help='Disable label type filtering (process all detected labels)')
     parser.add_argument('--draw-rectangles', action='store_true', help='Draw rectangles around detected regions for debugging')
     parser.add_argument('--draw-labels', action='store_true', help='Draw labels on rectangles (requires --draw-rectangles)')
+    parser.add_argument('--base-folder', help='Absolute path to WordPress root directory (used to construct wp-content/uploads output path)')
     
     args = parser.parse_args()
     
@@ -2564,7 +2572,8 @@ def main():
             image_type=args.image_type,
             force=args.force,
             draw_rectangles=args.draw_rectangles,
-            draw_labels=args.draw_labels
+            draw_labels=args.draw_labels,
+            base_folder=args.base_folder,
         )
         
         if not result['success']:
