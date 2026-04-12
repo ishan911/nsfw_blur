@@ -1413,13 +1413,14 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
 
-        # Create backup directory for original images
-        if base_folder:
-            backup_dir = os.path.join(base_folder, 'wp-content', 'uploads', 'backup', 'single')
-        else:
-            backup_dir = os.path.join(output_dir, "backup", "single")
-        os.makedirs(backup_dir, exist_ok=True)
-        
+        # Skip backup dir creation when inplace — PHP plugin handles backup via backupImageFile()
+        if not inplace:
+            if base_folder:
+                backup_dir = os.path.join(base_folder, 'wp-content', 'uploads', 'backup', 'single')
+            else:
+                backup_dir = os.path.join(output_dir, "backup", "single")
+            os.makedirs(backup_dir, exist_ok=True)
+
         # Initialize detectors
         print("Initializing detectors...")
         nudenet_detector = NudeNetDetector(
@@ -1488,12 +1489,13 @@ def sliding_single(image_path, output_dir="processed_images", image_type=None, f
                 'errors': 0
             }
         
-        # Create backup of original image
-        backup_filename = os.path.basename(local_image_path)
-        backup_path = os.path.join(backup_dir, backup_filename)
-        if not os.path.exists(backup_path):
-            shutil.copy2(local_image_path, backup_path)
-            print(f"  📁 Backed up to: {backup_path}")
+        # Create backup of original image (skipped when inplace — PHP handles backup)
+        if not inplace:
+            backup_filename = os.path.basename(local_image_path)
+            backup_path = os.path.join(backup_dir, backup_filename)
+            if not os.path.exists(backup_path):
+                shutil.copy2(local_image_path, backup_path)
+                print(f"  📁 Backed up to: {backup_path}")
 
         # Process the image
         print(f"Processing image: {filename}")
