@@ -594,6 +594,9 @@ def _apply_yolo_detection(input_path, output_path, yolo_model):
 
         if yolo_detections:
             img = cv2.imread(output_path)
+            if img is None:
+                print(f"    Error: could not read output image for blurring: {output_path}")
+                return yolo_detections
             for detection in yolo_detections:
                 try:
                     x1, y1, w, h = detection['box']

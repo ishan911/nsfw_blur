@@ -5,6 +5,7 @@ import numpy as np
 import cv2
 import pytest
 from unittest.mock import MagicMock, patch
+import torch
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +23,6 @@ def _make_mock_yolo_result(boxes_xyxy, confidences, class_ids, names):
     mock_box_list = []
     for (x1, y1, x2, y2), conf, cls_id in zip(boxes_xyxy, confidences, class_ids):
         b = MagicMock()
-        import torch
         b.xyxy = [torch.tensor([x1, y1, x2, y2], dtype=torch.float32)]
         b.conf = [torch.tensor(conf, dtype=torch.float32)]
         b.cls = [torch.tensor(float(cls_id), dtype=torch.float32)]
@@ -101,3 +101,27 @@ def test_class_name_is_preserved_not_generic(solid_image_path, output_path):
         f"Expected real class name but got '{detections[0]['class']}'"
     )
     assert not detections[0]["class"].startswith("yolo_class_")
+
+
+# ---------------------------------------------------------------------------
+# Guard — output_path missing must not crash
+# ---------------------------------------------------------------------------
+
+def test_missing_output_path_does_not_crash(solid_image_path, tmp_path):
+    """If output_path does not exist, the helper must not raise — returns detections."""
+    names = {0: "FEMALE_BREAST_EXPOSED"}
+    mock_result = _make_mock_yolo_result(
+        boxes_xyxy=[(10, 10, 50, 50)],
+        confidences=[0.85],
+        class_ids=[0],
+        names=names,
+    )
+    mock_model = MagicMock(return_value=[mock_result])
+
+    missing_output = str(tmp_path / "does_not_exist.jpg")
+
+    from main import _apply_yolo_detection
+    # Must not raise even when output_path is missing
+    result = _apply_yolo_detection(solid_image_path, missing_output, yolo_model=mock_model)
+    # Returns the detections (blur was skipped, but detection list is intact)
+    assert isinstance(result, list)
