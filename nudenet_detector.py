@@ -647,7 +647,7 @@ class NudeNetDetector:
                     continue
             
             # Save the image
-            cv2.imwrite(output_path, img)
+            cv2.imwrite(output_path, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
             print(f"Pixelated image saved: {output_path}")
             print(f"Successfully processed {valid_detections} out of {len(detections)} detections")
             
